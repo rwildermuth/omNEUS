@@ -1,0 +1,331 @@
+---
+title: "Get Atlantis pseudo-data"
+author: "Robert Wildermuth"
+date: "10/25/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Load atlantisom package and replacement functions
+```{r}
+library(atlantisom)
+library(tidyverse)
+
+source("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/load_neus_v1_runprm.R")
+source("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/run_truth.R")
+```
+
+Set up input for pseudo-data extraction and get the 'truth'
+```{r}
+# Bring in lookup of Atlantis codes and names for BDN node indices
+indBDNLookup <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/NeusGroups_modforusewNEUS1.0.csv", 
+                         stringsAsFactors = FALSE)
+indBDNLookup <- indBDNLookup %>% dplyr::select(Code, Name, Long.Name, BNindexGroup) %>%
+                  filter(BNindexGroup != "")
+
+# function args
+scenario = "neusDynEffort_Oct23_08d_"
+dir = "//storage1.smast.umassd.edu/lab_fay/rwildermuth/ATLANTIS/scenarios/Oct23_08d"
+file_fgs = "NeusGroups_modforusewNEUS1.0.csv"
+file_bgm = "neus30_2006.bgm" # geography bgm for box definitions
+select_groups = indBDNLookup$Name
+                # c("Diatom", # the group 'Name's in the 'file_fgs' file
+                #   "DinoFlag",
+                #   "PicoPhytopl",
+                #   "Lab_Det",
+                #   "Ref_Det",
+                #   "Pisciv_S_Fish",
+                #   "Demersal_DC_Fish",
+                #   "Macrobenth_Shallow",
+                #   "Benthic_grazer",
+                #   "Benthic_Carniv",
+                #   "Deposit_Feeder",
+                #   "Zoo",
+                #   "MicroZoo",
+                #   "Gelat_Zoo",
+                #   "Pinniped",
+                #   "Whale_Baleen",
+                #   "Pisciv_D_Fish",
+                #   "Pisciv_B_Fish",
+                #   "Demersal_D_Fish",
+                #   "Demersal_S_Fish",
+                #   "Demersal_B_Fish",
+                #   "Demersal_DC_Fish",
+                #   "Demersal_O_Fish",
+                #   "Demersal_F_Fish",
+                #   "Shark_B",
+                #   "Shark_D",
+                #   "SkateRay",
+                #   "Filter_Shallow",
+                #   "Filter_Other",
+                #   "Megazoobenthos",
+                #   "Prawn",
+                #   "Planktiv_L_Fish",
+                #   "Planktiv_S_Fish",
+                #   "Demersal_E_Fish",
+                #   "Cephalopod",
+                #   "Benthopel_Fish", 
+                #   "Meiobenth")
+# try shorter group list
+select_groups = c("Pinniped",
+                  "Whale_Baleen",
+                  "Pisciv_D_Fish",
+                  "Pisciv_B_Fish",
+                  "Demersal_D_Fish",
+                  "Demersal_S_Fish")
+file_init = "inneus_2007.nc" # initial condition .nc file
+file_biolprm = "at_biol_neus_Oct10B_Jason_FE.prm" # -b flag in the batch file
+file_runprm = "Run_settings.xml" # needed for catch correction calculation, how to replace? -r flag in batch file
+verbose = FALSE
+
+
+
+# Use modified run_truth()
+# truth <- run_truth(scenario = scenario,
+#                    dir = dir,
+#                    file_fgs = file_fgs,
+#                    file_bgm = file_bgm,
+#                    select_groups = select_groups,
+#                    file_init = file_init,
+#                    file_biolprm = file_biolprm,
+#                    file_runprm = "NEUSv1",
+#                    # saves to folder containing the Atlantis output
+#                    save = TRUE)
+load(paste0(dir, "/", scenario, "run_truth.RData"))
+truth <- result
+```
+
+Investigate differences in catch from .txt file and from spatially-explicit .nc file
+```{r}
+# get 'catch_all' in terms of group names
+fxnlGroups <- load_fgs(dir, file_fgs = file_fgs)
+
+codeNameMatch <- merge(truth$catch_all, fxnlGroups[, c("Code", "Name")], by.x = "species", by.y = "Code")
+
+truth$catch_all$species <- codeNameMatch$Name
+
+# subset to groups in 'select_groups'
+truth$catch_all <- truth$catch_all %>% dplyr::filter(species %in% select_groups)
+
+compare_catchB <-ggplot() +
+  geom_line(data=truth$bio_catch, aes(x=time,y=atoutput, #color="catch atlantisom"
+                                      ), 
+            alpha = 10/10) +
+  geom_point(data=truth$catch_all, aes(x=time,y=atoutput, #color="txt output catch bio"
+                                       ), # has all spp in Atlantis codes, not Names
+             alpha = 1/10) + 
+  theme_minimal() +
+  theme(legend.position = "top") 
+  #labs(colour=scenario.name)
+
+# compare_catchB + 
+#   facet_wrap(~species, ncol=3, nrow = 2, scales="free")
+
+# need to sum among 'bio_catch' values between time intervals in 'catch_all'
+truth$bio_catch$timeAgg <- 0
+
+for(i in 2:nrow(truth$catch_all)){
+  for(j in 1:nrow(truth$bio_catch)){
+    if(truth$bio_catch$time[j] > truth$catch_all$time[i-1] & 
+       truth$bio_catch$time[j] <= truth$catch_all$time[i]){
+      truth$bio_catch$timeAgg[j] <- truth$catch_all$time[i]
+    }
+  }
+}
+
+aggBioCatch <- truth$bio_catch %>% group_by(species, timeAgg) %>%
+            dplyr::summarize(catchAgg = sum(atoutput),
+                             n = n())
+
+check <- merge(truth$catch_all, aggBioCatch,
+               by.x = c("species", "time"), by.y = c("species", "timeAgg"))
+check$check <- with(check, atoutput / catchAgg)
+
+check %>% group_by(time) %>%
+  dplyr::summarize(minScale = min(check),
+                   maxScale = max(check))
+check %>% pivot_wider(id_cols = time, names_from = species, values_from = check)
+```
+
+Get the catches by species for Georges Bank
+```{r}
+# Subset to Georges Bank boxes and apply biomass conversion
+bio_catchGB <- calc_biomass_age(nums = truth$catch,
+                                resn = truth$resn, structn = truth$structn, biolprm = truth$biol)
+bio_catchGB <- bio_catchGB %>% filter(polygon %in% c(5, 7:11, 19)) %>%
+                  # Divide box 5 values in half 
+                  mutate(atoutput = case_when(polygon == 5 ~ atoutput/2,
+                                              polygon != 5 ~ atoutput)) 
+bio_catchGB <- aggregate(atoutput ~ species + time,
+                         data = bio_catchGB, sum)
+
+# compare_catchB + 
+#   geom_line(data=bio_catchGB, aes(x=time,y=atoutput, color="blue"), 
+#             alpha = 10/10) +
+#   facet_wrap(~species, ncol=3, nrow = 2, scales="free")
+
+# need to sum among 'bio_catchGB' values between time intervals in 'catch_all'
+bio_catchGB$timeAgg <- 0
+
+for(i in 2:nrow(truth$catch_all)){
+  for(j in 1:nrow(bio_catchGB)){
+    if(bio_catchGB$time[j] > truth$catch_all$time[i-1] & 
+       bio_catchGB$time[j] <= truth$catch_all$time[i]){
+      bio_catchGB$timeAgg[j] <- truth$catch_all$time[i]
+    }
+  }
+}
+
+aggBioCatchGB <- bio_catchGB %>% group_by(species, timeAgg) %>%
+            dplyr::summarize(catchAgg = sum(atoutput),
+                             n = n())
+
+# Find proportion of catch biomass in Georges Bank by species
+aggBioCatchGB <- merge(aggBioCatchGB, aggBioCatch, by = c("species", "timeAgg"))
+aggBioCatchGB$propGB <- with(aggBioCatchGB, catchAgg.x/catchAgg.y)
+
+# multiply .txt catch by Georges Bank proportions and create pseudo-data time series
+catchGB <- merge(truth$catch_all, aggBioCatchGB, 
+                 by.x = c("species", "time"), by.y = c("species", "timeAgg"))
+# remove initial year and unneeded columns
+catchGB <- catchGB %>% filter(time != 0) %>%
+              dplyr::select(species, time, atoutput, propGB) %>%
+              mutate(catch = atoutput * propGB)
+
+# compare_catchB + 
+#   geom_line(data=catchGB, aes(x=time,y=catch, color="GB catch"), 
+#             alpha = 10/10) +
+#   facet_wrap(~species, ncol=3, nrow = 2, scales="free")
+```
+
+Explore variation in data indices for habitat calculations
+```{r}
+test5 <- aggregate(atoutput ~ species + time + polygon,
+                         data = truth$nums, sum)
+test5 %>% filter(species == "Demersal_D_Fish")
+
+ggplot() +
+  geom_line(data=test5, aes(x=time,y=atoutput, color=polygon), 
+            alpha = 10/10) +
+  facet_wrap(~species, ncol=3, nrow = 2, scales="free")
+
+test5 %>% filter(#species == "Demersal_D_Fish", 
+                 polygon %in% c(5, 7:11, 19)) %>%
+  ggplot() +
+  geom_line(aes(x=time,y=atoutput, color=polygon), 
+            alpha = 10/10) +
+  facet_wrap(~species, ncol=3, nrow = 3, scales="free")
+
+# maybe use condition factor?
+condition <- merge(truth$resn, truth$structn, by = c("species", "agecl", "polygon", "layer", "time"))
+condition$condition <- condition$atoutput.x/condition$atoutput.y
+
+test6 <- condition %>% filter(condition < 2.65)
+test6 <- condition %>% filter(condition > 2.65)
+unique(unique(test6[,-c(6:8)])[, c("species", "agecl")])
+dim(condition); dim(test6)
+# need to select by mature age classes
+matOgive <- truth$biolprm$maturityogive
+matOgive <- merge(matOgive, fxnlGroups[, c("Code", "Name")], by.x = "code", by.y = "Code")
+names(matOgive)[which(names(matOgive) == " agecl10")] <- "agecl10"
+matOgive <- matOgive %>% dplyr::select("Name", paste0("agecl", 1:10)) %>%
+              pivot_longer(cols = starts_with("agecl"), names_to = "agecl",
+                           names_prefix = "agecl", names_ptypes = numeric(),
+                           values_to = "propMat_fctr") %>%
+              mutate(agecl = as.numeric(agecl),
+                     propMat = as.numeric(as.character(propMat_fctr)))
+
+#Calculate habitat as the number of mature indivs * their condition ratio
+numMat <- merge(truth$nums, matOgive, by.x = c("species", "agecl"), by.y = c("Name", "agecl"))
+numMat <- numMat %>% dplyr::select(species, agecl, polygon, layer, time, atoutput, propMat) %>%
+            mutate(numMat = atoutput * propMat)
+numMat <- merge(numMat, condition, by = c("species", "agecl", "polygon", "layer", "time"))
+
+# need separate dataset for Nearshore Habitat
+# doesn't work b/c no age groups -> no maturity ogive
+numMatNear <- numMat %>% filter(species %in% c("Filter_Other",
+                                               "Deposit_Feeder",
+                                               "Meiobenth"))
+  
+numMat <- numMat %>% mutate(condIndex = numMat * condition)
+
+numMat <- numMat %>% group_by(species, time) %>%
+            dplyr::select(species, agecl, polygon, layer, time, condIndex) %>%
+            dplyr::summarize(condIndex = sum(condIndex))
+
+# ggplot() + 
+#   geom_line(data=numMat, aes(x=time,y=condIndex), 
+#             alpha = 10/10) +
+#   facet_wrap(~species, ncol=3, nrow = 2, scales="free")
+
+# aggregate by focal group similar to BDN
+# Seafloor and Demersal Habitat
+habDem <- numMat %>% filter(species %in% indBDNLookup[indBDNLookup$BNindexGroup == "groundfish",
+                                                      "Name"])
+habDem <- habDem %>% group_by(time) %>%
+            dplyr::summarize(condIndex = sum(condIndex))
+plot(habDem$time, habDem$condIndex, type = "l")
+
+# Pelagic Habitat
+habPel <- numMat %>% filter(species %in% indBDNLookup[indBDNLookup$BNindexGroup == "forage",
+                                                      "Name"])
+habPel <- habPel %>% group_by(time) %>%
+            dplyr::summarize(condIndex = sum(condIndex))
+plot(habPel$time, habPel$condIndex, type = "l")
+
+# Nearshore Habitat
+# do similar, but only for  lower trophic benthic groups for half of Box 5
+habNear <-  numMatNear %>% filter(polygon == 5) %>%
+              mutate(condIndex = numMat/2 * condition) %>% 
+              group_by(species, time) %>%
+              dplyr::select(species, agecl, polygon, layer, time, condIndex) %>%
+              dplyr::summarize(condIndex = sum(condIndex))
+habNear <- habNear %>% group_by(time) %>%
+            dplyr::summarize(condIndex = sum(condIndex))
+plot(habNear$time, habNear$condIndex, type = "l")
+```
+Pull salinity and temperature time series
+```{r}
+bboxes <- get_boundary(load_box(dir = dir, file_bgm = file_bgm))
+truthTemp <- load_nc_physics(dir = dir, file_nc = "neusDynEffort_Oct23_08d_.nc",
+                             physic_variables = "Temp", aggregate_layers = FALSE, 
+                             bboxes = bboxes)
+
+truthSal <- load_nc_physics(dir = dir, file_nc = "neusDynEffort_Oct23_08d_.nc",
+                             physic_variables = "salt", aggregate_layers = FALSE, 
+                             bboxes = bboxes)
+
+truthPhys <- merge(truthTemp, truthSal, by = c("polygon", "layer", "time"))
+truthPhys <- truthPhys %>% dplyr::select(polygon, layer, time, atoutput.x, atoutput.y) %>%
+                rename(temp = atoutput.x, 
+                       sal = atoutput.y) %>%
+                filter(polygon %in% c(5, 7:11, 19))
+
+# maybe use Chl-a as nearshore habitat indicator?
+truthChla <- load_nc_physics(dir = dir, file_nc = "neusDynEffort_Oct23_08d_.nc",
+                             physic_variables = "Chl_a", aggregate_layers = TRUE, 
+                             bboxes = bboxes)
+```
+
+Try to get biomass of bio pools for nearshore habitat
+```{r}
+bps <- load_bps(dir = dir, fgs = file_fgs, file_init = file_init)
+fgs <- load_fgs(dir = dir, file_fgs = file_fgs)
+truthNear <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
+                     bps = bps, fgs = fgs, 
+                     select_groups = c("Filter_Other",
+                                       "Deposit_Feeder",
+                                       "Meiobenth"),
+                     select_variable = "N", bboxes = bboxes)
+truthNear <- truthNear %>% filter(polygon == 5)
+```
+
+# Adding measurement error
+Apply survey sampling OM functions to biomass truth
+These methods follow S. Gaichas and C. Stawitz here: https://sgaichas.github.io/poseidon-dev/NEUSStandardSurveyTest.html and https://sgaichas.github.io/poseidon-dev/StandardSurveyTest.html
+```{r}
+
+```
