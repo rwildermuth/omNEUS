@@ -14,8 +14,8 @@ Load atlantisom package and replacement functions
 library(atlantisom)
 library(tidyverse)
 
-source("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/load_neus_v1_runprm.R")
-source("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/run_truth.R")
+source("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/load_neus_v1_runprm.R")
+source("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/run_truth.R")
 ```
 
 Set up input for pseudo-data extraction and get the 'truth'
@@ -287,6 +287,9 @@ habNear <- habNear %>% group_by(time) %>%
             dplyr::summarize(condIndex = sum(condIndex))
 plot(habNear$time, habNear$condIndex, type = "l")
 ```
+
+
+
 Pull salinity and temperature time series
 ```{r}
 bboxes <- get_boundary(load_box(dir = dir, file_bgm = file_bgm))
@@ -310,22 +313,148 @@ truthChla <- load_nc_physics(dir = dir, file_nc = "neusDynEffort_Oct23_08d_.nc",
                              bboxes = bboxes)
 ```
 
-Try to get biomass of bio pools for nearshore habitat
+Try to get biomass of bio pools for nearshore habitat and lower trophic groups
 ```{r}
 bps <- load_bps(dir = dir, fgs = file_fgs, file_init = file_init)
 fgs <- load_fgs(dir = dir, file_fgs = file_fgs)
-truthNear <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
+invertPools <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
                      bps = bps, fgs = fgs, 
                      select_groups = c("Filter_Other",
                                        "Deposit_Feeder",
                                        "Meiobenth"),
                      select_variable = "N", bboxes = bboxes)
-truthNear <- truthNear %>% filter(polygon == 5)
+#truthNear <- truthNear %>% filter(polygon == 5)
+
+test2 <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
+                        bps = bps, fgs = fgs, 
+                        select_groups = c("Benthopel_Fish"),
+                        select_variable = "N", bboxes = bboxes)
+test3 <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
+                        bps = bps, fgs = fgs, 
+                        select_groups = c("Benthopel_Fish"),
+                        select_variable = "ResN", bboxes = bboxes)
+test4 <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
+                        bps = bps, fgs = fgs, 
+                        select_groups = c("Benthopel_Fish"),
+                        select_variable = "StructN", bboxes = bboxes)
+test2 %>% filter(polygon == 5, time == 0, layer == 0) # not the sum of structN and resN
+test3 %>% filter(polygon == 5, time == 0, layer == 0)
+test4 %>% filter(polygon == 5, time == 0, layer == 0)
+```
+
+Calculate wet weight of biomass pools using conversion in Atlantis manual, pg 151: weight_g = (1 + 2.65) * strutural N
+```{r}
+# Ratio of reserve to structural N for NEUS is 2.65
+invertPools$atoutput <- invertPools$atoutput * (1 + 2.65)
+
+# convert to weight in tonnes?
+invertPools$test1 <- invertPools$atoutput / 1e6
 ```
 
 # Adding measurement error
 Apply survey sampling OM functions to biomass truth
 These methods follow S. Gaichas and C. Stawitz here: https://sgaichas.github.io/poseidon-dev/NEUSStandardSurveyTest.html and https://sgaichas.github.io/poseidon-dev/StandardSurveyTest.html
 ```{r}
+# species groupings for different exposure to the survey
+# RW: edited for returning vert groups listed in 'indBDNLookup'
+nontrawl <- c("Shark_D", "Pinniped", "Whale_Baleen")
+pelagics <- c("Planktiv_L_Fish", "Planktiv_S_Fish", "Benthopel_Fish", "Pisciv_S_Fish")
+demersals <- c("Pisciv_D_Fish", "Demersal_D_Fish","Demersal_E_Fish", 
+                 "Demersal_S_Fish","Demersal_B_Fish","Demersal_DC_Fish",
+                 "Demersal_O_Fish","Demersal_F_Fish",
+                 "Shark_B", "SkateRay")
+selflats <- c("Pisciv_B_Fish")
+survspp <- c(nontrawl, pelagics, demersals, selflats)
 
+# Use hardcoded fall sampling frame for NEUS 1.0 in trunk here
+annualfall <- seq(4,202,4)
+
+
+#   define bottom trawl mixed efficiency
+ef.nt <- 0.01 # for large pelagics, reef dwellers, others not in trawlable habitat
+ef.pl <- 0.1  # for pelagics
+ef.dm <- 0.7  # for demersals
+ef.fl <- 1.1  # for selected flatfish
+
+# bottom trawl survey efficiency specification by species group
+effnontrawl <- data.frame(species=nontrawl, efficiency=rep(ef.nt,length(nontrawl)))
+effpelagics <- data.frame(species=pelagics, efficiency=rep(ef.pl,length(pelagics)))
+effdemersals <- data.frame(species=demersals, efficiency=rep(ef.dm,length(demersals)))
+effselflats <- data.frame(species=selflats, efficiency=rep(ef.fl,length(selflats)))
+
+efficmix <- bind_rows(effnontrawl, effpelagics, effdemersals, effselflats)
+
+#   mixed selectivity (using 10 agecl for all species)
+#     flat=1 for large pelagics, reef dwellers, others not in trawlable habitat
+#     sigmoid 0 to 1 with 0.5 inflection at agecl 3 for pelagics, reaching 1 at agecl 5, flat top
+#     sigmoid 0 to 1 with 0.5 inflection at agecl 5 for most demersals and flatfish, reaching 1 at agecl 7, flat top
+#     dome shaped 0 to 1 at agecl 6&7 for selected demersals, falling off to 0.7 by agecl 10
+
+sigmoid <- function(a,b,x) {
+  1 / (1 + exp(-a-b*x))
+}
+
+# survey selectivity specification by species group
+selnontrawl <- data.frame(species=rep(nontrawl, each=10),
+                          agecl=rep(c(1:10),length(nontrawl)),
+                          selex=rep(1.0,length(nontrawl)*10))
+selpelagics <- data.frame(species=rep(pelagics, each=10),
+                          agecl=rep(c(1:10),length(pelagics)),
+                          selex=sigmoid(5,1,seq(-10,10,length.out=10)))
+seldemersals <- data.frame(species=rep(demersals, each=10),
+                          agecl=rep(c(1:10),length(demersals)),
+                          selex=sigmoid(1,1,seq(-10,10,length.out=10)))
+selselflats <- data.frame(species=rep(selflats, each=10),
+                          agecl=rep(c(1:10),length(selflats)),
+                          selex=sigmoid(1,1,seq(-10,10,length.out=10)))
+
+# same selectivity for selflats and demersals specified above
+# visualze selectivity curves for each group
+par(mfrow=c(2,2))
+par(mar=c(4,4,1,1))
+plot(selnontrawl$agecl, selnontrawl$selex)
+plot(selpelagics$agecl, selpelagics$selex)
+plot(seldemersals$agecl, seldemersals$selex)
+plot(selselflats$agecl, selselflats$selex)
+
+selexmix <- bind_rows(selnontrawl, selpelagics, seldemersals, selselflats)
+
+# use this constant 0 cv for testing
+#surv_cv_0 <- data.frame(species=survspp, cv=rep(0.0,length(survspp)))
+
+#   define bottom trawl survey cv by group
+cv.nt <- 1.0 # for large pelagics, reef dwellers, others not in trawlable habitat
+cv.pl <- 0.5  # for pelagics
+cv.dm <- 0.3  # for demersals
+cv.fl <- 0.3  # for selected flatfish
+
+# specify cv by species groups
+surv_cv_nontrawl <- data.frame(species=nontrawl, cv=rep(cv.nt,length(nontrawl)))
+surv_cv_pelagics <- data.frame(species=pelagics, cv=rep(cv.pl,length(pelagics)))
+surv_cv_demersals <- data.frame(species=demersals, cv=rep(cv.dm,length(demersals)))
+surv_cv_selflats <- data.frame(species=selflats, cv=rep(cv.fl,length(selflats)))
+
+surv_cv_mix <- bind_rows(surv_cv_nontrawl, surv_cv_pelagics, surv_cv_demersals, surv_cv_selflats)
+
+# use biomasses from 'truth' via run_truth() to sample and add survey error
+biomassTruth <- calc_biomass_age(nums = truth$nums,
+                                 resn = truth$resn, structn = truth$structn, biolprm = truth$biol)
+
+survey_testBstd <- create_survey(dat = biomassTruth,
+                                 time = annualfall,
+                                 species = survspp,
+                                 boxes = c(5,7:11,19), # Georges Bank boxes
+                                 effic = efficmix,
+                                 selex = selexmix)
+
+# call sample_survey_biomass with a bunch of 1s for weight at age
+# in the code it multiplies atoutput by wtatage so this allows us to use
+# biomass directly
+wtage <- data.frame(species=rep(survspp, each=10),
+                    agecl=rep(c(1:10),length(survspp)),
+                    wtAtAge=rep(1.0,length(survspp)*10))
+
+stdsurveyB_frombio <- sample_survey_biomass(survey_testBstd, surv_cv_mix, wtage)
+
+# Want numbers for pinnipeds and baleen whales though
 ```

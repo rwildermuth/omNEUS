@@ -1,5 +1,9 @@
 # Figure out a daily mortality rate for simulating effect of wind farms
 
+library(tidync)
+library(tidyverse)
+
+
 # annual mortality factor
 annMort <- 0.05
 
@@ -7,3 +11,43 @@ annMort <- 0.05
 annMort/365
 
 
+# Check that it's working
+
+# load biomasses for the base scenario
+biomassConnect <- tidync("C:/Users/rwildermuth/Documents/AtlantisTesting/5yrTest/NeusScenario3aa000_10daybase/neusDynEffort_Oct23_08d_.nc")
+
+biomassConnect %>% hyper_filter()
+baseDepFeedN <- biomassConnect %>% 
+                    activate(what = "D2,D1,D0") %>% 
+                    hyper_tibble() %>%
+                    select(t, z, b, Deposit_Feeder_N, Benthic_Carniv_N)
+unique(baseDepFeedN$t)
+
+baseFiltersN <- biomassConnect %>% 
+                  activate(what = "D1,D0") %>% 
+                  hyper_tibble() %>%
+                  select(t, b, Filter_Shallow_N, Filter_Other_N, 
+                         Macrobenth_Shallow_N, Megazoobenthos_N, Benthic_grazer_N)
+
+# load biomasses for the mortality scenario
+biomassConnect <- tidync("C:/Users/rwildermuth/Documents/AtlantisTesting/5yrTest/NeusScenario3aa000_10daymort/neusDynEffort_Oct23_08d_.nc")
+
+biomassConnect %>% hyper_filter()
+mortDepFeedN <- biomassConnect %>% 
+  activate(what = "D2,D1,D0") %>% 
+  hyper_tibble() %>%
+  select(t, z, b, Deposit_Feeder_N, Benthic_Carniv_N)
+unique(mortDepFeedN$t)
+
+mortFiltersN <- biomassConnect %>% 
+  activate(what = "D1,D0") %>% 
+  hyper_tibble() %>%
+  select(t, b, Filter_Shallow_N, Filter_Other_N, 
+         Macrobenth_Shallow_N, Megazoobenthos_N, Benthic_grazer_N)
+
+test1 <- merge(baseDepFeedN, mortDepFeedN, by = c("t", "z", "b"))
+test1 %>% filter(b == 5, z == 5) %>% arrange(t)
+
+
+test2 <- merge(baseFiltersN, mortFiltersN, by = c("t", "b"))
+test2 %>% filter(b == 5) %>% arrange(t) %>% select(t, b, Filter_Shallow_N.x, Filter_Shallow_N.y)
