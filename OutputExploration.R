@@ -31,7 +31,7 @@ load_nc_physics(dir = "//storage1.smast.umassd.edu/lab_fay/rwildermuth/ATLANTIS/
 # Try from Sarah's notes
 # taken from existing load_nc
 
-file.nc <- "//storage1.smast.umassd.edu/lab_fay/rwildermuth/ATLANTIS/scenarios/Oct23_08d/neusDynEffort_Oct23_08d_.nc"
+file.nc <- "C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/Oct23_08d/neusDynEffort_Oct23_08d_.nc"
 
 # Load ATLANTIS output!
 at_out <- RNetCDF::open.nc(con = file.nc)
@@ -94,11 +94,13 @@ prodConnect %>% activate(DepositFeedProdn) %>% hyper_tibble()
 prodConnect %>% activate(nominal_dz)
 prodConnect %>% activate(topk)
 
-totConnect <- tidync("//storage1.smast.umassd.edu/lab_fay/rwildermuth/ATLANTIS/scenarios/Oct23_08d/neusDynEffort_Oct23_08d_TOT.nc")
+totConnect <- tidync("//storage1.smast.umassd.edu/lab_fay/rwildermuth/ATLANTIS/scenarios/NeusScenario3aa000/neusDynEffort_Oct23_08d_TOT.nc")
 
 totConnect %>% hyper_filter()
 test2 <- totConnect %>% activate("D1,D0") %>% hyper_vars()
 test2$name
+test2 <- totConnect %>% activate("Demersal_B_Fish_N") %>% hyper_tibble()
+
 
 test5 <- totConnect %>% activate(Gelat_Zoo_N)
 test5 %>% hyper_vars()
@@ -108,7 +110,7 @@ test6 <- test5 %>% hyper_array()
 str(test6)
 test6$Gelat_Zoo_N
 
-catchConnect <- tidync("//storage1.smast.umassd.edu/lab_fay/rwildermuth/ATLANTIS/scenarios/Oct23_08d/neusDynEffort_Oct23_08d_CATCH.nc")
+catchConnect <- tidync("C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/Oct23_08d/neusDynEffort_Oct23_08d_CATCH.nc")
 
 catchConnect %>% hyper_filter()
 test3 <- catchConnect %>% activate("D1,D0") %>% hyper_vars()
@@ -209,3 +211,23 @@ area7 <- 10363076990 * 1e-6
 nearAffected/area5
 # proportion of Box 7 affected
 seafloorAffected/area7
+
+# Check that rerun of baseline matches the one Gavin sent
+baseline <- "C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/Oct23_08d"
+vGavin <- "//storage1.smast.umassd.edu/lab_fay/rwildermuth/ATLANTIS/scenarios/Oct23_08d"
+
+gavBiomIndx <- read_table2(paste(vGavin, "neusDynEffort_Oct23_08d_BiomIndx.txt", sep = "/"))
+baseBiomIndx <- read_table2(paste(baseline, "neusDynEffort_Oct23_08d_BiomIndx.txt", sep = "/"))
+all(gavBiomIndx == baseBiomIndx)
+
+gavCatch <- read_table2(paste(vGavin, "neusDynEffort_Oct23_08d_Catch.txt", sep = "/"))
+baseCatch <- read_table2(paste(baseline, "neusDynEffort_Oct23_08d_Catch.txt", sep = "/"))
+all(gavCatch == baseCatch)
+
+gavCatchpFish <- read_table2(paste(vGavin, "neusDynEffort_Oct23_08d_CatchPerFishery.txt", sep = "/"))
+baseCatchpFish <- read_table2(paste(baseline, "neusDynEffort_Oct23_08d_CatchPerFishery.txt", sep = "/"))
+all(gavCatchpFish == baseCatchpFish)
+
+gavEffort <- read_table2(paste(vGavin, "neusDynEffort_Oct23_08d_Effort.txt", sep = "/"))
+baseEffort <- read_table2(paste(baseline, "neusDynEffort_Oct23_08d_Effort.txt", sep = "/"))
+all(gavEffort == baseEffort)

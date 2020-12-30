@@ -274,7 +274,7 @@ run_truth <- function(scenario, dir = getwd(),
   if(verbose) message("Catch per fishery read in.")
   
   # Get catch from txt. Sum per species and compare with values from nc-file!
-  catch_all <- load_catch(dir = dir, file = file_catch, fgs = fgs)
+  catch_all <- load_catch(dir = dir, file_catch = file_catch, fgs = fgs)
   # over <- colnames(catch_all)[(colnames(catch_all) %in% fgs$Code)]
   # catch_all <- reshape(catch_all[, c("Time", over)], direction = "long",
   #   varying = over, v.names = "catch",

@@ -2,13 +2,13 @@
 load_neus_v1_runprm <- function() {
   run <- list(
     toutstart = 1,
-    toutinc = 90,
-    toutfinc = 90,
-    tstop = 18260,
+    toutinc = 365, #90, RW: changed to match NeusScenario3aa runs
+    toutfinc = 365, #90,
+    tstop = 54760, #18260,
     nyears = 50,
     timestep = 12,
     timestepunit = "Hours",
-    outputstep = 90,
+    outputstep = 365, #90,
     outputstepunit = "days",
     hemisphere = "northern",
     nspp = 67,
