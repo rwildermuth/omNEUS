@@ -95,6 +95,7 @@ prodConnect %>% activate(nominal_dz)
 prodConnect %>% activate(topk)
 
 totConnect <- tidync("//storage1.smast.umassd.edu/lab_fay/rwildermuth/ATLANTIS/scenarios/NeusScenario3aa000/neusDynEffort_Oct23_08d_TOT.nc")
+totConnect <- tidync("C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/NeusScenario3aa000/NeusScenario3aa000TOT.nc")
 
 totConnect %>% hyper_filter()
 test2 <- totConnect %>% activate("D1,D0") %>% hyper_vars()

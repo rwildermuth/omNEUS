@@ -10,6 +10,9 @@ annMort <- 0.05
 # daily mortalty
 annMort/365
 
+# Atlantis fishing mortality probability based on Sec 15.3.1 in Atlantis manual (pg 14)
+mFC <- 1-exp(-annMort/365)
+
 
 # Check that it's working
 

@@ -1,7 +1,7 @@
 ---
-title: "Get Atlantis pseudo-data"
+title: "Compare Atlantis Scenario Output"
 author: "Robert Wildermuth"
-date: "10/25/2020"
+date: "1/26/2021"
 output: html_document
 ---
 
@@ -44,155 +44,23 @@ ConvertBiomassPool <- function(groupSN, # structural nitrogen (mg) from Out.nc
 ConvertBiomassPool(groupSN = 10000)
 ```
 
-# Historical Period
-
-Set up input for pseudo-data extraction and get the 'truth'
+Function to extract data
 ```{r}
-# Bring in lookup of Atlantis codes and names for BDN node indices
-indBDNLookup <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/NeusGroups_modforusewNEUS1.0.csv", 
-                         stringsAsFactors = FALSE)
-indBDNLookup <- indBDNLookup %>% dplyr::select(Code, Name, Long.Name, BNindexGroup) %>%
-                  filter(BNindexGroup != "")
+# args: indBDNLookup, scenario, dir, file_fgs, file_bgm, select_groups, file_init, file_biolprm, 
 
-# MSE scenario
-scenarioMSEfolder <- "Oct23_08d"
+# Pull in the data from Atlantis using modified run_truth()
+truth <- run_truth(scenario = scenario,
+                   dir = dir,
+                   file_fgs = file_fgs,
+                   file_bgm = file_bgm,
+                   select_groups = select_groups,
+                   file_init = file_init,
+                   file_biolprm = file_biolprm,
+                   file_runprm = "NEUSv1",
+                   # saves to folder containing the Atlantis output
+                   save = TRUE)
 
-# function args
-scenario = "neusDynEffort_Oct23_08d_" # Output file prefix
-dir = paste0("C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/",
-             scenarioMSEfolder)
-file_fgs = "NeusGroups_modforusewNEUS1.0.csv"
-file_bgm = "neus30_2006.bgm" # geography bgm for box definitions
-select_groups = indBDNLookup$Name
-                # c("Diatom", # the group 'Name's in the 'file_fgs' file
-                #   "DinoFlag",
-                #   "PicoPhytopl",
-                #   "Lab_Det",
-                #   "Ref_Det",
-                #   "Pisciv_S_Fish",
-                #   "Demersal_DC_Fish",
-                #   "Macrobenth_Shallow",
-                #   "Benthic_grazer",
-                #   "Benthic_Carniv",
-                #   "Deposit_Feeder",
-                #   "Zoo",
-                #   "MicroZoo",
-                #   "Gelat_Zoo",
-                #   "Pinniped",
-                #   "Whale_Baleen",
-                #   "Pisciv_D_Fish",
-                #   "Pisciv_B_Fish",
-                #   "Demersal_D_Fish",
-                #   "Demersal_S_Fish",
-                #   "Demersal_B_Fish",
-                #   "Demersal_DC_Fish",
-                #   "Demersal_O_Fish",
-                #   "Demersal_F_Fish",
-                #   "Shark_B",
-                #   "Shark_D",
-                #   "SkateRay",
-                #   "Filter_Shallow",
-                #   "Filter_Other",
-                #   "Megazoobenthos",
-                #   "Prawn",
-                #   "Planktiv_L_Fish",
-                #   "Planktiv_S_Fish",
-                #   "Demersal_E_Fish",
-                #   "Cephalopod",
-                #   "Benthopel_Fish", 
-                #   "Meiobenth")
-# try shorter group list
-# select_groups = c("Pinniped",
-#                   "Whale_Baleen",
-#                   "Pisciv_D_Fish",
-#                   "Pisciv_B_Fish",
-#                   "Demersal_D_Fish",
-#                   "Demersal_S_Fish")
-file_init = "inneus_2007.nc" # initial condition .nc file
-file_biolprm = "at_biol_neus_Oct10B_Jason_FE.prm" # -b flag in the batch file
-file_runprm = "Run_settings.xml" # needed for catch correction calculation, how to replace? -r flag in batch file
-verbose = FALSE
-
-
-
-# Use modified run_truth()
-# truth <- run_truth(scenario = scenario,
-#                    dir = dir,
-#                    file_fgs = file_fgs,
-#                    file_bgm = file_bgm,
-#                    select_groups = select_groups,
-#                    file_init = file_init,
-#                    file_biolprm = file_biolprm,
-#                    file_runprm = "NEUSv1",
-#                    # saves to folder containing the Atlantis output
-#                    save = TRUE)
-load(paste0(dir, "/", scenario, "run_truth.RData"))
-truth <- result
-```
-
-Investigate differences in catch from .txt file and from spatially-explicit .nc file
-```{r}
-# get 'catch_all' in terms of group names
-fxnlGroups <- load_fgs(dir, file_fgs = file_fgs)
-
-codeNameMatch <- merge(truth$catch_all, fxnlGroups[, c("Code", "Name")], by.x = "species", by.y = "Code")
-
-truth$catch_all$species <- codeNameMatch$Name
-
-# subset to groups in 'select_groups'
-truth$catch_all <- truth$catch_all %>% dplyr::filter(species %in% select_groups)
-
-unique(truth$catch_all$time)
-unique(truth$bio_catch$time) # need to adjust time to deal with 90 output periodicity
-unique(truth$catch$time)
-
-compare_catchB <-ggplot() +
-  geom_line(data=truth$bio_catch, aes(x=time,y=atoutput, #color="catch atlantisom"
-                                      ), 
-            alpha = 10/10) +
-  geom_point(data=truth$catch_all, aes(x=time,y=atoutput, #color="txt output catch bio"
-                                       ), # has all spp in Atlantis codes, not Names
-             alpha = 1/10) + 
-  theme_minimal() +
-  theme(legend.position = "top") 
-  #labs(colour=scenario.name)
-
-for(i in 1:5){
-  print(compare_catchB +
-          facet_wrap_paginate(~species, ncol=3, nrow = 2, scales="free", page = i))
-}
-
-# For when fisheries output at diff interval from summary output
-# # need to sum among 'bio_catch' values between time intervals in 'catch_all'
-# truth$bio_catch$timeAgg <- 0
-# 
-# for(i in 2:nrow(truth$catch_all)){
-#   for(j in 1:nrow(truth$bio_catch)){
-#     if(truth$bio_catch$time[j] > truth$catch_all$time[i-1] & 
-#        truth$bio_catch$time[j] <= truth$catch_all$time[i]){
-#       truth$bio_catch$timeAgg[j] <- truth$catch_all$time[i]
-#     }
-#   }
-# }
-# 
-# aggBioCatch <- truth$bio_catch %>% group_by(species, timeAgg) %>%
-#             dplyr::summarize(catchAgg = sum(atoutput),
-#                              n = n())
-# 
-# check <- merge(truth$catch_all, aggBioCatch,
-#                by.x = c("species", "time"), by.y = c("species", "timeAgg"))
-# check$check <- with(check, atoutput / catchAgg)
-# 
-# check %>% group_by(time) %>%
-#   dplyr::summarize(minScale = min(check),
-#                    maxScale = max(check))
-# check %>% pivot_wider(id_cols = time, names_from = species, values_from = check)
-```
-Open points are from the Catch.txt file, line from the aggregated catch biomass calculation with scaling from BF Dec 2015
-
-
-Get the catches by species for Georges Bank
-```{r}
+# Get the catches by species for Georges Bank
 # Subset to Georges Bank boxes and apply biomass conversion
 bio_catchGB <- calc_biomass_age(nums = truth$catch,
                                 resn = truth$resn, structn = truth$structn, biolprm = truth$biol)
@@ -203,30 +71,6 @@ bio_catchGB <- bio_catchGB %>% filter(polygon %in% c(5, 7:11, 19)) %>%
 bio_catchGB <- aggregate(atoutput ~ species + time,
                          data = bio_catchGB, sum)
 
-# compare_catchB + 
-#   geom_line(data=bio_catchGB, aes(x=time,y=atoutput, color="blue"), 
-#             alpha = 10/10) +
-#   facet_wrap(~species, ncol=3, nrow = 2, scales="free")
-
-# # need to sum among 'bio_catchGB' values between time intervals in 'catch_all'
-# bio_catchGB$timeAgg <- 0
-# 
-# for(i in 2:nrow(truth$catch_all)){
-#   for(j in 1:nrow(bio_catchGB)){
-#     if(bio_catchGB$time[j] > truth$catch_all$time[i-1] & 
-#        bio_catchGB$time[j] <= truth$catch_all$time[i]){
-#       bio_catchGB$timeAgg[j] <- truth$catch_all$time[i]
-#     }
-#   }
-# }
-# 
-# aggBioCatchGB <- bio_catchGB %>% group_by(species, timeAgg) %>%
-#             dplyr::summarize(catchAgg = sum(atoutput),
-#                              n = n())
-
-# Find proportion of catch biomass in Georges Bank by species
-# aggBioCatchGB <- merge(aggBioCatchGB, aggBioCatch, by = c("species", "timeAgg"))
-# aggBioCatchGB$propGB <- with(aggBioCatchGB, catchAgg.x/catchAgg.y)
 
 aggBioCatchGB <- merge(bio_catchGB, truth$bio_catch, by = c("species", "time"))
 aggBioCatchGB$propGB <- with(aggBioCatchGB, atoutput.x/atoutput.y)
@@ -238,25 +82,19 @@ catchGB <- catchGB %>% filter(time != 0) %>%
               dplyr::select(species, time, atoutput, propGB) %>%
               mutate(catchGB = atoutput * propGB)
 
-# compare_catchB + 
-#   geom_line(data=catchGB, aes(x=time,y=catch, color="GB catch"), 
-#             alpha = 10/10) +
-#   facet_wrap(~species, ncol=3, nrow = 2, scales="free")
-```
 
-Aggregate catch based on fish groups
-```{r}
+# Aggregate catch based on fish groups
 commGF <- catchGB %>% 
               filter(species %in% indBDNLookup[indBDNLookup$BNindexGroup == "groundfish", "Name"]) %>%
               group_by(time) %>% 
               dplyr::summarize(commGF = sum(catchGB))
-ggplot() + geom_line(data = commGF, aes(x=time,y=commGF))
+# ggplot() + geom_line(data = commGF, aes(x=time,y=commGF))
 
 commPel <- catchGB %>% 
               filter(species %in% indBDNLookup[indBDNLookup$BNindexGroup == "forage", "Name"]) %>%
               group_by(time) %>% 
               dplyr::summarize(commPel = sum(catchGB))
-ggplot() + geom_line(data = commPel, aes(x=time,y=commPel))
+# ggplot() + geom_line(data = commPel, aes(x=time,y=commPel))
 
 # need to calculate catch of invertebrate groups similar to run_truth()
 # 1. Pull catches for entire system
@@ -280,13 +118,13 @@ sfCatchNC <- catchConnect %>% activate("D1,D0") %>%
 sfCatchNC <- sfCatchNC %>% select(b, t, numlayers, topk, all_of(search))
 
 # Check that TOTCATCH.nc matches Catch.txt
-totCatchCheck <- sfCatchNC %>% group_by(t) %>%
-                    dplyr::summarize(Tot_BFS_Catch = sum(Tot_BFS_Catch),
-                                     Tot_BFS_RecCatch = sum(Tot_BFS_RecCatch),
-                                     Tot_BFS_Discards = sum(Tot_BFS_Discards),
-                                     Tot_BML_Catch = sum(Tot_BML_Catch),
-                                     Tot_BML_RecCatch = sum(Tot_BML_RecCatch),
-                                     Tot_BML_Discards = sum(Tot_BML_Discards))
+# totCatchCheck <- sfCatchNC %>% group_by(t) %>%
+#                     dplyr::summarize(Tot_BFS_Catch = sum(Tot_BFS_Catch),
+#                                      Tot_BFS_RecCatch = sum(Tot_BFS_RecCatch),
+#                                      Tot_BFS_Discards = sum(Tot_BFS_Discards),
+#                                      Tot_BML_Catch = sum(Tot_BML_Catch),
+#                                      Tot_BML_RecCatch = sum(Tot_BML_RecCatch),
+#                                      Tot_BML_Discards = sum(Tot_BML_Discards))
 # Values in "Catch" column similar to Catch.txt
 
 
@@ -309,16 +147,14 @@ commSF$commSF <- rowSums(commSF[ ,c("Tot_BFS_Catch", "Tot_BML_Catch", "Tot_PWN_C
 commSF <- commSF %>% select(b, t, numlayers, topk, Tot_BFS_Catch, Tot_BML_Catch, Tot_PWN_Catch, commSF) %>%
               group_by(t) %>%
               dplyr::summarize(commSF = sum(commSF)) %>% 
-              mutate(time = ((t/(60*60*24))-1)/365) %>%
-              filter(time != 0) %>%
-              filter(time <= 50)
+              mutate(time = ((t/(60*60*24))-1)/365) #%>%
+              #filter(time != 0) %>%
+              #filter(time <= 50)
 
 
-ggplot() + geom_line(data = commSF, aes(x=t,y=commSF))
-```
+# ggplot() + geom_line(data = commSF, aes(x=t,y=commSF))
 
-Find biomasses for age-structured fish groups
-```{r}
+#Find biomasses for age-structured fish groups
 # First convert to biomass (mT)
 biomassTruth <- calc_biomass_age(nums = truth$nums,
                                  resn = truth$resn, structn = truth$structn, biolprm = truth$biol)
@@ -352,29 +188,11 @@ invertsGB <- invertsGB %>% mutate(inverts = ConvertBiomassPool(groupSN = atoutpu
 
 invertsGB <- invertsGB %>% group_by(time) %>% 
           dplyr::summarize(inverts = sum(inverts))
-ggplot() + geom_line(data = invertsGB, aes(x=time,y=inverts))
+# ggplot() + geom_line(data = invertsGB, aes(x=time,y=inverts))
 
-```
+# ----------- Habitats -----------------
 
-Explore variation in data indices for habitat calculations
-```{r}
-# test5 <- aggregate(atoutput ~ species + time + polygon,
-#                          data = truth$nums, sum)
-# test5 %>% filter(species == "Demersal_D_Fish")
-# 
-# ggplot() +
-#   geom_line(data=test5, aes(x=time,y=atoutput, color=polygon), 
-#             alpha = 10/10) +
-#   facet_wrap(~species, ncol=3, nrow = 2, scales="free")
-# 
-# test5 %>% filter(#species == "Demersal_D_Fish", 
-#                  polygon %in% c(5, 7:11, 19)) %>%
-#   ggplot() +
-#   geom_line(aes(x=time,y=atoutput, color=polygon), 
-#             alpha = 10/10) +
-#   facet_wrap(~species, ncol=3, nrow = 3, scales="free")
-
-# maybe use condition factor?
+# use condition factor as indices for habitat calculations
 condition <- merge(truth$resn, truth$structn, by = c("species", "agecl", "polygon", "layer", "time"))
 condition$condition <- condition$atoutput.x/condition$atoutput.y
 
@@ -700,6 +518,93 @@ neusHistoricData <- neusHistoricData %>% filter(time != 0) %>%
 
 neusHistoricData %>% select( -c("time", "PS")) %>% cor(method = "spearman")
 ```
+
+# Run data extraction on scenario outputs
+
+Set up input for pseudo-data extraction and get the 'truth'
+```{r}
+# Bring in lookup of Atlantis codes and names for BDN node indices
+indBDNLookup <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/NeusGroups_modforusewNEUS1.0.csv", 
+                         stringsAsFactors = FALSE)
+indBDNLookup <- indBDNLookup %>% dplyr::select(Code, Name, Long.Name, BNindexGroup) %>%
+                  filter(BNindexGroup != "")
+
+# MSE scenario
+scenarioMSEfolder <- "Oct23_08d"
+
+# function args
+scenario = "neusDynEffort_Oct23_08d_" # Output file prefix
+dir = paste0("C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/",
+             scenarioMSEfolder)
+file_fgs = "NeusGroups_modforusewNEUS1.0.csv"
+file_bgm = "neus30_2006.bgm" # geography bgm for box definitions
+select_groups = indBDNLookup$Name
+                # c("Diatom", # the group 'Name's in the 'file_fgs' file
+                #   "DinoFlag",
+                #   "PicoPhytopl",
+                #   "Lab_Det",
+                #   "Ref_Det",
+                #   "Pisciv_S_Fish",
+                #   "Demersal_DC_Fish",
+                #   "Macrobenth_Shallow",
+                #   "Benthic_grazer",
+                #   "Benthic_Carniv",
+                #   "Deposit_Feeder",
+                #   "Zoo",
+                #   "MicroZoo",
+                #   "Gelat_Zoo",
+                #   "Pinniped",
+                #   "Whale_Baleen",
+                #   "Pisciv_D_Fish",
+                #   "Pisciv_B_Fish",
+                #   "Demersal_D_Fish",
+                #   "Demersal_S_Fish",
+                #   "Demersal_B_Fish",
+                #   "Demersal_DC_Fish",
+                #   "Demersal_O_Fish",
+                #   "Demersal_F_Fish",
+                #   "Shark_B",
+                #   "Shark_D",
+                #   "SkateRay",
+                #   "Filter_Shallow",
+                #   "Filter_Other",
+                #   "Megazoobenthos",
+                #   "Prawn",
+                #   "Planktiv_L_Fish",
+                #   "Planktiv_S_Fish",
+                #   "Demersal_E_Fish",
+                #   "Cephalopod",
+                #   "Benthopel_Fish", 
+                #   "Meiobenth")
+# try shorter group list
+# select_groups = c("Pinniped",
+#                   "Whale_Baleen",
+#                   "Pisciv_D_Fish",
+#                   "Pisciv_B_Fish",
+#                   "Demersal_D_Fish",
+#                   "Demersal_S_Fish")
+file_init = "inneus_2007.nc" # initial condition .nc file
+file_biolprm = "at_biol_neus_Oct10B_Jason_FE.prm" # -b flag in the batch file
+file_runprm = "Run_settings.xml" # needed for catch correction calculation, how to replace? -r flag in batch file
+verbose = FALSE
+
+
+
+# Use modified run_truth()
+# truth <- run_truth(scenario = scenario,
+#                    dir = dir,
+#                    file_fgs = file_fgs,
+#                    file_bgm = file_bgm,
+#                    select_groups = select_groups,
+#                    file_init = file_init,
+#                    file_biolprm = file_biolprm,
+#                    file_runprm = "NEUSv1",
+#                    # saves to folder containing the Atlantis output
+#                    save = TRUE)
+load(paste0(dir, "/", scenario, "run_truth.RData"))
+truth <- result
+```
+
 
 # Adding measurement error
 Apply survey sampling OM functions to biomass truth
