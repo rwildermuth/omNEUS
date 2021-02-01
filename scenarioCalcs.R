@@ -79,3 +79,7 @@ baseHistN %>% dplyr::select(t, z, b)
 histTest <- baseHistN %>% filter(t == initTime)
 initTest <- initBiom1994N %>% filter(t == initTime) %>% dplyr::select(names(histTest))
 dim(merge(histTest, initTest, all.x = TRUE))
+
+#---------------------------------------------------------------
+baselineConnect <- tidync("C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/NeusScenario_baseline/NeusScenario_baseline.nc")
+baselineConnect %>% hyper_filter()

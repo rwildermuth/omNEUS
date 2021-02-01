@@ -1597,7 +1597,7 @@ flagbuffereffort 0         1=effort buffering on for dynamic fleet model, 0 = of
 flagchangeeffort 1         1=fishing pressure changes with time, 0=remains constant            0
 flagchangediscrd 1         1=discarding practices change with time, 0=remain constant          0
 flagchangesel    0         1=selectivity changes with time, 0=remains constant                 0
-flagchangeF      0         1=F mortality rate forcing changes, 0=F not used or remains constant 0
+flagchangeF      1         1=F mortality rate forcing changes, 0=F not used or remains constant 0
 flagchangeq      1         1=catchability changes with time, 0=remains constant                0
 flagchangep      0         1=fisheries spatial coverage changes with time, 0=remains constant  0
 flagchangecap    0         1=fisheries effortcap changes with time, 0=remains constant         0
