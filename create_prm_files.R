@@ -2,7 +2,7 @@ library(stringr)
 source("change_param.R")
 
 outfile <- "newtable.out"
-origfile <- "harvest_base.prm"
+origfile <- "harvest_sandbox.prm"
 
 param.name <- "mFC_"
 name2 <- NULL
