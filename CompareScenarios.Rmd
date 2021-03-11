@@ -3,6 +3,8 @@ title: "Compare Atlantis Scenario Output"
 author: "Robert Wildermuth"
 date: "1/26/2021"
 output: html_document
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -19,6 +21,8 @@ library(oce)
 
 source("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/load_neus_v1_runprm.R")
 source("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/run_truth.R")
+
+source("C:/Users/rwildermuth/Dropbox/PhD_UMass/GB_BBN/thresholdsLookup.R")
 ```
 
 Function to convert nitrogen into tonnes wet weight biomass for biomass pool inverts
@@ -44,9 +48,16 @@ ConvertBiomassPool <- function(groupSN, # structural nitrogen (mg) from Out.nc
 ConvertBiomassPool(groupSN = 10000)
 ```
 
-Function to extract data
+Function to extract data and compile dataset for comparison
 ```{r}
-# args: indBDNLookup, scenario, dir, file_fgs, file_bgm, select_groups, file_init, file_biolprm, 
+CompileNEUSIndicators <- function(bdnLookup,
+                                  scenario,
+                                  dir, 
+                                  file_fgs,
+                                  file_bgm,
+                                  select_groups, 
+                                  file_init,
+                                  file_biolprm){
 
 # Pull in the data from Atlantis using modified run_truth()
 truth <- run_truth(scenario = scenario,
@@ -74,6 +85,16 @@ bio_catchGB <- aggregate(atoutput ~ species + time,
 
 aggBioCatchGB <- merge(bio_catchGB, truth$bio_catch, by = c("species", "time"))
 aggBioCatchGB$propGB <- with(aggBioCatchGB, atoutput.x/atoutput.y)
+
+# Need to change 'time' range to match load_nc() output
+truth$catch_all <- truth$catch_all %>% mutate(time = as.integer(round(time-30)))
+
+# get 'catch_all' in terms of group names
+fxnlGroups <- load_fgs(dir, file_fgs = file_fgs)
+
+codeNameMatch <- merge(truth$catch_all, fxnlGroups[, c("Code", "Name")], by.x = "species", by.y = "Code")
+
+truth$catch_all$species <- codeNameMatch$Name
 
 # multiply .txt catch by Georges Bank proportions and create pseudo-data time series
 catchGB <- merge(truth$catch_all, aggBioCatchGB, by = c("species", "time"))
@@ -146,8 +167,8 @@ commSF <- sfCatchNC %>% filter(b %in% c(5, 7:11, 19)) %>%
 commSF$commSF <- rowSums(commSF[ ,c("Tot_BFS_Catch", "Tot_BML_Catch", "Tot_PWN_Catch")])
 commSF <- commSF %>% select(b, t, numlayers, topk, Tot_BFS_Catch, Tot_BML_Catch, Tot_PWN_Catch, commSF) %>%
               group_by(t) %>%
-              dplyr::summarize(commSF = sum(commSF)) %>% 
-              mutate(time = ((t/(60*60*24))-1)/365) #%>%
+              dplyr::summarize(commSF = sum(commSF)) 
+commSF <- commSF %>% mutate(time = 0:(length(commSF)-1))# ((t/(60*60*24))-1)/365) #%>%
               #filter(time != 0) %>%
               #filter(time <= 50)
 
@@ -164,14 +185,14 @@ groundGB <- biomassTruth %>%
               filter(polygon %in% c(5, 7:11, 19)) %>%
               group_by(time) %>% 
               dplyr::summarize(ground = sum(atoutput))
-ggplot() + geom_line(data = groundGB, aes(x=time,y=ground))
+# ggplot() + geom_line(data = groundGB, aes(x=time,y=ground))
 
 forageGB <- biomassTruth %>% 
               filter(species %in% indBDNLookup[indBDNLookup$BNindexGroup == "forage", "Name"]) %>%
               filter(polygon %in% c(5, 7:11, 19)) %>%
               group_by(time) %>% 
               dplyr::summarize(forage = sum(atoutput))
-ggplot() + geom_line(data = forageGB, aes(x=time,y=forage))
+# ggplot() + geom_line(data = forageGB, aes(x=time,y=forage))
 
 fgs <- load_fgs(dir = dir, file_fgs = file_fgs)
 bps <- load_bps(dir = dir, fgs = file_fgs, file_init = file_init)
@@ -196,10 +217,11 @@ invertsGB <- invertsGB %>% group_by(time) %>%
 condition <- merge(truth$resn, truth$structn, by = c("species", "agecl", "polygon", "layer", "time"))
 condition$condition <- condition$atoutput.x/condition$atoutput.y
 
-test6 <- condition %>% filter(condition < 2.65)
-test6 <- condition %>% filter(condition > 2.65)
-unique(unique(test6[,-c(6:8)])[, c("species", "agecl")])
-dim(condition); dim(test6)
+# test6 <- condition %>% filter(condition < 2.65)
+# test6 <- condition %>% filter(condition > 2.65)
+# unique(unique(test6[,-c(6:8)])[, c("species", "agecl")])
+# dim(condition); dim(test6)
+
 # need to select by mature age classes
 matOgive <- truth$biolprm$maturityogive
 matOgive <- merge(matOgive, fxnlGroups[, c("Code", "Name")], by.x = "code", by.y = "Code")
@@ -217,12 +239,6 @@ numMat <- numMat %>% dplyr::select(species, agecl, polygon, layer, time, atoutpu
             mutate(numMat = atoutput * propMat)
 numMat <- merge(numMat, condition, by = c("species", "agecl", "polygon", "layer", "time"))
 
-# need separate dataset for Nearshore Habitat
-# doesn't work b/c no age groups -> no maturity ogive
-numMatNear <- numMat %>% filter(species %in% c("Filter_Other",
-                                               "Deposit_Feeder",
-                                               "Meiobenth"))
-  
 numMat <- numMat %>% mutate(condIndex = numMat * condition)
 
 numMat <- numMat %>% group_by(species, time) %>%
@@ -241,31 +257,19 @@ habDem <- numMat %>% filter(species %in% indBDNLookup[indBDNLookup$BNindexGroup 
 habDem <- habDem %>% group_by(time) %>%
             dplyr::summarize(habDem = sum(condIndex)) 
 
-plot(habDem$time, habDem$habDem, type = "l")
+# plot(habDem$time, habDem$habDem, type = "l")
 
 # Pelagic Habitat
 habPel <- numMat %>% filter(species %in% indBDNLookup[indBDNLookup$BNindexGroup == "forage",
                                                       "Name"])
 habPel <- habPel %>% group_by(time) %>%
             dplyr::summarize(habPel = sum(condIndex)) 
-plot(habPel$time, habPel$habPel, type = "l")
+# plot(habPel$time, habPel$habPel, type = "l")
 
 # Nearshore Habitat
-# do similar, but only for  lower trophic benthic groups for half of Box 5
-habNear <-  numMatNear %>% filter(polygon == 5) %>%
-              mutate(condIndex = numMat/2 * condition) %>% 
-              group_by(species, time) %>%
-              dplyr::select(species, agecl, polygon, layer, time, condIndex) %>%
-              dplyr::summarize(condIndex = sum(condIndex))
-habNear <- habNear %>% group_by(time) %>%
-            dplyr::summarize(condIndex = sum(condIndex))
-# plot(habNear$time, habNear$condIndex, type = "l")
-```
-
-Try to get biomass of bio pools for nearshore habitat
-```{r}
-bps <- load_bps(dir = dir, fgs = file_fgs, file_init = file_init)
-fgs <- load_fgs(dir = dir, file_fgs = file_fgs)
+# Calculate wet weight of biomass pools using conversion in Atlantis manual, pg 151: weight_g = (1 + 2.65) * strutural N
+# bps <- load_bps(dir = dir, fgs = file_fgs, file_init = file_init)
+# fgs <- load_fgs(dir = dir, file_fgs = file_fgs)
 invertPools <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
                      bps = bps, fgs = fgs, 
                      select_groups = c("Filter_Other",
@@ -273,44 +277,25 @@ invertPools <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
                                        "Meiobenth"),
                      select_variable = "N", bboxes = bboxes)
 
-test2 <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
-                        bps = bps, fgs = fgs, 
-                        select_groups = c("Benthopel_Fish"),
-                        select_variable = "N", bboxes = bboxes)
-test3 <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
-                        bps = bps, fgs = fgs, 
-                        select_groups = c("Benthopel_Fish"),
-                        select_variable = "ResN", bboxes = bboxes)
-test4 <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
-                        bps = bps, fgs = fgs, 
-                        select_groups = c("Benthopel_Fish"),
-                        select_variable = "StructN", bboxes = bboxes)
-test2 %>% filter(polygon == 5, time == 0, layer == 0) # not the sum of structN and resN
-test3 %>% filter(polygon == 5, time == 0, layer == 0)
-test4 %>% filter(polygon == 5, time == 0, layer == 0)
-```
-
-Calculate wet weight of biomass pools using conversion in Atlantis manual, pg 151: weight_g = (1 + 2.65) * strutural N
-```{r}
 # Subset for Nearshore Habitat
 truthNear <- invertPools %>% filter(polygon == 5, layer == 4) %>%
                 mutate(habNear = ConvertBiomassPool(groupSN = atoutput))
 
 truthNear <- truthNear %>% group_by(time) %>% 
           dplyr::summarize(habNear = sum(habNear))
-ggplot() + geom_line(data = truthNear, aes(x=time,y=habNear))
-```
+# ggplot() + geom_line(data = truthNear, aes(x=time,y=habNear))
 
 
+# ------------ Environmental variables ----------------------------------------
 
-Pull salinity and temperature time series
-```{r}
-bboxes <- get_boundary(load_box(dir = dir, file_bgm = file_bgm))
-truthTemp <- load_nc_physics(dir = dir, file_nc = "neusDynEffort_Oct23_08d_.nc",
+# Pull salinity and temperature time series
+
+#bboxes <- get_boundary(load_box(dir = dir, file_bgm = file_bgm))
+truthTemp <- load_nc_physics(dir = dir, file_nc = paste0(scenario, ".nc"),
                              physic_variables = "Temp", aggregate_layers = FALSE, 
                              bboxes = bboxes)
 
-truthSal <- load_nc_physics(dir = dir, file_nc = "neusDynEffort_Oct23_08d_.nc",
+truthSal <- load_nc_physics(dir = dir, file_nc = paste0(scenario, ".nc"),
                              physic_variables = "salt", aggregate_layers = FALSE, 
                              bboxes = bboxes)
 
@@ -321,17 +306,13 @@ truthPhys <- truthPhys %>% dplyr::select(polygon, layer, time, atoutput.x, atout
                 filter(polygon %in% c(5, 7:11, 19))
 
 # Use Chl-a for primary production indicator?
-truthChla <- load_nc_physics(dir = dir, file_nc = "neusDynEffort_Oct23_08d_.nc",
+truthChla <- load_nc_physics(dir = dir, file_nc = paste0(scenario, ".nc"),
                              physic_variables = "Chl_a", aggregate_layers = TRUE, 
                              bboxes = bboxes)
 truthChla <- truthChla %>% filter(polygon %in% c(5, 7:11, 19)) %>%
                 group_by(time) %>%
-                dplyr::summarize(PP = sum(atoutput)) %>%
-                filter(!time %in% c(0,51))
-
-#!!! need to figure out how to translate into mg Chla/m^3?
-
-unique(truthPhys[, c("polygon", "layer")])
+                dplyr::summarize(PP = sum(atoutput)) #%>%
+                #filter(!time %in% c(0,51))
 
 truthPhys <- truthPhys %>% mutate(density = swRho(salinity = sal, temperature = temp, 
                                                   pressure = 0, eos = "unesco"))
@@ -358,60 +339,32 @@ strat <- truthPhys %>% filter(polygon == 10, layer %in% c(0,1)) %>%
             filter(layer == 0) %>%
             arrange(time)
 
-plot(strat$time, strat$strat, type = "l")
-```
+# plot(strat$time, strat$strat, type = "l")
 
+# --------------------- Recreational Fishing Participation ------------------------
+# Use record of recreational effort instead
 
-Pull in catch by fishery to get recreational catch
-```{r}
-# poach code from load_catch()
-file.catch <- file.path(dir, paste0(scenario, "CatchPerFishery.txt"))
-recCatch <- read.table(file.catch, header = TRUE)
-
-unique(recCatch$Fishery)
-
-fgs <- fgs[fgs$IsTurnedOn > 0,]
-fishedlookup <- fgs[fgs$isFished > 0,]
-  
-names(recCatch)[na.omit(match(fishedlookup$Code,names(recCatch)))] <- na.omit(fishedlookup$Name)
-  
-recCatch <- recCatch %>% filter(Fishery == "recfish") %>%
-    tidyr::gather(species, catchbio, -Time, -Fishery)
-  
-out <- data.frame(species = recCatch$species,
-                    agecl = NA,
-                    polygon = NA,
-                    layer = NA,
-                    time = recCatch$Time,
-                    atoutput = recCatch$catchbio)
-  
-out <- out[order(out$species,out$time,out$polygon,out$agecl),]
-
-```
-
-Use record of recreational effort instead
-```{r}
 file.catch <- file.path(dir, paste0(scenario, "Effort.txt"))
 recEffort <- read.table(file.catch, header = TRUE)
 
-matplot(recEffort$Time/365, recEffort[,-c(1,26)], type = "l")
+# matplot(recEffort$Time/365, recEffort[,-c(1,26)], type = "l")
 
 recEffort <- recEffort %>% dplyr::select(Time, recfish) %>%
-                mutate(time = Time/365) %>%
+                mutate(time = 1:nrow(recEffort)) %>%
                 rename(recParticip = recfish)
-plot(recEffort$Time/365, recEffort$recParticip)
-```
+# plot(recEffort$Time/365, recEffort$recParticip)
 
-Create timeseries of categories for baleen whales and pinnipeds
-```{r}
+# ---------------- Focal Groups: PS ---------------------------
+# Create timeseries of categories for baleen whales and pinnipeds
+
 marmams <- truth$nums %>% dplyr::filter(species %in% c("Pinniped", "Whale_Baleen"), 
                                         polygon %in% c(5, 7:11, 19)) 
 
 marmams <- marmams %>%
               group_by(species, time) %>% 
               dplyr::summarize(Num = sum(atoutput))
-ggplot() + geom_line(data = marmams, aes(x=time,y=Num)) +
-      facet_wrap(~species, scales = "free")
+# ggplot() + geom_line(data = marmams, aes(x=time,y=Num)) +
+#       facet_wrap(~species, scales = "free")
 
 marmams <- marmams %>% pivot_wider(names_from = species, values_from = Num)
 
@@ -428,11 +381,10 @@ for(i in 1:(nrow(marmams)-1)){
 
 marmams$PS <- paste(marmams$catHL, marmams$rwIorD, sep = "")
 
-marmams <- marmams %>% filter(!time %in% c(0, 51))
-```
+# marmams <- marmams %>% filter(!time %in% c(0, 51))
 
-Lower trophic component indicators
-```{r}
+# ----------------- Lower trophic components -------------------------------
+
 # Gelatinous Zooplankton
 gzGB <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
                      bps = bps, fgs = fgs, 
@@ -442,7 +394,7 @@ gzGB <- gzGB %>% filter(polygon %in% c(5, 7:11, 19))
 
 gzGB <- gzGB %>% group_by(species, time) %>% 
           dplyr::summarize(GZ = sum(atoutput))
-ggplot() + geom_line(data = gzGB, aes(x=time,y=GZ))
+# ggplot() + geom_line(data = gzGB, aes(x=time,y=GZ))
 
 # Copepods and Micronekton
 cmGB <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
@@ -453,7 +405,7 @@ cmGB <- cmGB %>% filter(polygon %in% c(5, 7:11, 19))
 
 cmGB <- cmGB %>% group_by(time) %>% 
           dplyr::summarize(copepod = sum(atoutput))
-ggplot() + geom_line(data = cmGB, aes(x=time,y=copepod))
+# ggplot() + geom_line(data = cmGB, aes(x=time,y=copepod))
 
 # Benthos
 benthGB <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
@@ -464,7 +416,7 @@ benthGB <- benthGB %>% filter(polygon %in% c(5, 7:11, 19))
 
 benthGB <- benthGB %>% group_by(time) %>% 
           dplyr::summarize(benthos = sum(atoutput))
-ggplot() + geom_line(data = benthGB, aes(x=time,y=benthos))
+# ggplot() + geom_line(data = benthGB, aes(x=time,y=benthos))
 
 # Detritus & Bacteria
 detBacGB <- load_nc(dir = dir, file_nc = paste0(scenario, ".nc"),
@@ -475,19 +427,18 @@ detBacGB <- detBacGB %>% filter(polygon %in% c(5, 7:11, 19))
 
 detBacGB <- detBacGB %>% group_by(time) %>% 
           dplyr::summarize(detBac = sum(atoutput))
-ggplot() + geom_line(data = detBacGB, aes(x=time,y=detBac))
+# ggplot() + geom_line(data = detBacGB, aes(x=time,y=detBac))
 
 # Mid-Atlantic Bight Groundfish
 gfMABGB <- biomassTruth %>% filter(species %in% indBDNLookup[indBDNLookup$BNindexGroup == "gfMAB", "Name"]) %>%
             filter(polygon %in% c(5, 7:11, 19)) %>%
             group_by(time) %>% 
             dplyr::summarize(gfMAB = sum(atoutput))
-ggplot() + geom_line(data = gfMABGB, aes(x=time,y=gfMAB))
-```
+# ggplot() + geom_line(data = gfMABGB, aes(x=time,y=gfMAB))
 
-Gather together for assessment model input
-```{r}
-neusHistoricData <- bottomST %>% full_join(surfaceST, by = "time") %>%
+# Gather together for assessment model input
+
+neusData <- bottomST %>% full_join(surfaceST, by = "time") %>%
                       full_join(strat, by = "time") %>%
                       full_join(truthChla, by = "time") %>%
                       full_join(detBacGB, by = "time") %>%
@@ -511,17 +462,12 @@ neusHistoricData <- bottomST %>% full_join(surfaceST, by = "time") %>%
                               commSF, commPel, commGF, habDem, habNear, habPel, 
                               inverts, ground, forage, PS, recParticip)
 
-neusHistoricData <- neusHistoricData %>% filter(time != 0) %>%
-                      filter(time <= 50)
+return(neusData)
 
-# save(neusHistoricData, file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusHistoricData.RData")
-
-neusHistoricData %>% select( -c("time", "PS")) %>% cor(method = "spearman")
+}
 ```
 
-# Run data extraction on scenario outputs
-
-Set up input for pseudo-data extraction and get the 'truth'
+# Run extraction function on Atlantis NEUS scenario output
 ```{r}
 # Bring in lookup of Atlantis codes and names for BDN node indices
 indBDNLookup <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/NeusGroups_modforusewNEUS1.0.csv", 
@@ -529,184 +475,642 @@ indBDNLookup <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/NeusGr
 indBDNLookup <- indBDNLookup %>% dplyr::select(Code, Name, Long.Name, BNindexGroup) %>%
                   filter(BNindexGroup != "")
 
+# ----- Baseline Scenario -----------------
 # MSE scenario
-scenarioMSEfolder <- "Oct23_08d"
+scenarioMSEfolder <- "NeusScenario_baseline"
 
 # function args
-scenario = "neusDynEffort_Oct23_08d_" # Output file prefix
+scenario = "NeusScenario_baseline" # Output file prefix
 dir = paste0("C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/",
              scenarioMSEfolder)
 file_fgs = "NeusGroups_modforusewNEUS1.0.csv"
 file_bgm = "neus30_2006.bgm" # geography bgm for box definitions
 select_groups = indBDNLookup$Name
-                # c("Diatom", # the group 'Name's in the 'file_fgs' file
-                #   "DinoFlag",
-                #   "PicoPhytopl",
-                #   "Lab_Det",
-                #   "Ref_Det",
-                #   "Pisciv_S_Fish",
-                #   "Demersal_DC_Fish",
-                #   "Macrobenth_Shallow",
-                #   "Benthic_grazer",
-                #   "Benthic_Carniv",
-                #   "Deposit_Feeder",
-                #   "Zoo",
-                #   "MicroZoo",
-                #   "Gelat_Zoo",
-                #   "Pinniped",
-                #   "Whale_Baleen",
-                #   "Pisciv_D_Fish",
-                #   "Pisciv_B_Fish",
-                #   "Demersal_D_Fish",
-                #   "Demersal_S_Fish",
-                #   "Demersal_B_Fish",
-                #   "Demersal_DC_Fish",
-                #   "Demersal_O_Fish",
-                #   "Demersal_F_Fish",
-                #   "Shark_B",
-                #   "Shark_D",
-                #   "SkateRay",
-                #   "Filter_Shallow",
-                #   "Filter_Other",
-                #   "Megazoobenthos",
-                #   "Prawn",
-                #   "Planktiv_L_Fish",
-                #   "Planktiv_S_Fish",
-                #   "Demersal_E_Fish",
-                #   "Cephalopod",
-                #   "Benthopel_Fish", 
-                #   "Meiobenth")
-# try shorter group list
-# select_groups = c("Pinniped",
-#                   "Whale_Baleen",
-#                   "Pisciv_D_Fish",
-#                   "Pisciv_B_Fish",
-#                   "Demersal_D_Fish",
-#                   "Demersal_S_Fish")
 file_init = "inneus_2007.nc" # initial condition .nc file
 file_biolprm = "at_biol_neus_Oct10B_Jason_FE.prm" # -b flag in the batch file
-file_runprm = "Run_settings.xml" # needed for catch correction calculation, how to replace? -r flag in batch file
-verbose = FALSE
 
 
+neusBaseline <- CompileNEUSIndicators(bdnLookup = indBDNLookup,
+                                      scenario = scenario,
+                                      dir = dir, 
+                                      file_fgs = file_fgs,
+                                      file_bgm = file_bgm,
+                                      select_groups = select_groups, 
+                                      file_init = file_init,
+                                      file_biolprm = file_biolprm)
 
-# Use modified run_truth()
-# truth <- run_truth(scenario = scenario,
-#                    dir = dir,
-#                    file_fgs = file_fgs,
-#                    file_bgm = file_bgm,
-#                    select_groups = select_groups,
-#                    file_init = file_init,
-#                    file_biolprm = file_biolprm,
-#                    file_runprm = "NEUSv1",
-#                    # saves to folder containing the Atlantis output
-#                    save = TRUE)
-load(paste0(dir, "/", scenario, "run_truth.RData"))
-truth <- result
+
+# trim and save NEUS scenario data
+neusBaseline <- neusBaseline %>% filter(time > 0) %>%
+                      filter(time <= 70)
+
+# save(neusBaseline, file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusBaseline.RData")
+
+# ----- Wind Scenario -----------------
+# MSE scenario
+scenarioMSEfolder <- "NeusScenario_wind"
+
+# function args
+scenario = "NeusScenario_wind" # Output file prefix
+dir = paste0("C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/",
+             scenarioMSEfolder)
+
+neusWind <- CompileNEUSIndicators(bdnLookup = indBDNLookup,
+                                      scenario = scenario,
+                                      dir = dir, 
+                                      file_fgs = file_fgs,
+                                      file_bgm = file_bgm,
+                                      select_groups = select_groups, 
+                                      file_init = file_init,
+                                      file_biolprm = file_biolprm)
+
+
+# trim and save NEUS scenario data
+neusWind <- neusWind %>% filter(time > 0) %>%
+                      filter(time <= 70)
+
+# save(neusWind, file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusWind.RData")
+
+# ----- Inc Fishing Scenario -----------------
+# MSE scenario
+scenarioMSEfolder <- "NeusScenario_doubleF"
+
+# function args
+scenario = "NeusScenario_doubleF" # Output file prefix
+dir = paste0("C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/",
+             scenarioMSEfolder)
+
+neusIncFish <- CompileNEUSIndicators(bdnLookup = indBDNLookup,
+                                      scenario = scenario,
+                                      dir = dir, 
+                                      file_fgs = file_fgs,
+                                      file_bgm = file_bgm,
+                                      select_groups = select_groups, 
+                                      file_init = file_init,
+                                      file_biolprm = file_biolprm)
+
+
+# trim and save NEUS scenario data
+neusIncFish <- neusIncFish %>% filter(time > 0) %>%
+                      filter(time <= 70)
+
+# save(neusIncFish, file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusIncFish.RData")
+
+# ----- Dec Fishing Scenario -----------------
+# MSE scenario
+scenarioMSEfolder <- "NeusScenario_halveF"
+
+# function args
+scenario = "NeusScenario_halveF" # Output file prefix
+dir = paste0("C:/Users/rwildermuth/Documents/AtlantisTesting/FishingScenarios/",
+             scenarioMSEfolder)
+
+neusDecFish <- CompileNEUSIndicators(bdnLookup = indBDNLookup,
+                                      scenario = scenario,
+                                      dir = dir, 
+                                      file_fgs = file_fgs,
+                                      file_bgm = file_bgm,
+                                      select_groups = select_groups, 
+                                      file_init = file_init,
+                                      file_biolprm = file_biolprm)
+
+
+# trim and save NEUS scenario data
+neusDecFish <- neusDecFish %>% filter(time > 0) %>%
+                      filter(time <= 70)
+
+# save(neusDecFish, file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusDecFish.RData")
+
+```
+
+# Compare output to QNM model
+## Baseline
+```{r}
+load(file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusBaseline.RData")
+load(file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusWind.RData")
+load(file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusDecFish.RData")
+load(file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusIncFish.RData")
+
+
+# First check for stability at end of scenario
+CheckStable <- function(dat){
+  dat %>% pivot_longer(cols = -c(time, PS), names_to = "variable") %>%
+                  ggplot() +
+                    geom_line(aes(x=time,y=value, #color="catch atlantisom"
+                                                        ), 
+                              alpha = 10/10) +
+                    theme_minimal() +
+                    theme(legend.position = "top") 
+}
+
+CheckStable(neusBaseline) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 1) 
+CheckStable(neusBaseline) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 2)
+CheckStable(neusBaseline) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 3)
+
+
+```
+## Wind Energy
+```{r}
+CheckStable(neusWind) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 1) 
+CheckStable(neusWind) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 2)
+CheckStable(neusWind) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 3)
+```
+## Increased Fishing
+```{r}
+CheckStable(neusIncFish) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 1) 
+CheckStable(neusIncFish) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 2)
+CheckStable(neusIncFish) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 3)
+```
+
+## Decreased Fishing
+```{r}
+CheckStable(neusDecFish) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 1) 
+CheckStable(neusDecFish) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 2)
+CheckStable(neusDecFish) + facet_wrap_paginate(~variable, ncol=3, nrow = 3, scales="free", page = 3)
+```
+
+```{r}
+# load historic data and find mean of last 5 years
+load(file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/neusHistoricData.RData")
+
+# Write processing function then apply over each scenario's table
+ProcessLast5y <- function(dataTbl, # Scenario data table with numeric vals
+                          scenarioName # Character lable for the scenario
+                          ){
+  sumTbl <- dataTbl %>% #select(-"PS") %>%
+                  filter(time >= (nrow(dataTbl)-4)) %>%
+                  mutate(scenario = scenarioName)
+  
+  # # add summary of character/categorical data
+  # sumTbl$PS <- dataTbl %>% select(time, PS) %>%
+  #                 filter(time >= (nrow(dataTbl)-4)) %>%
+  
+  return(sumTbl)
+                          }
+
+qnmOutcomes <- rbind(ProcessLast5y(dataTbl = neusHistoricData, scenarioName = "Historic"),
+                     # include last 5 years before scenarios applied
+                     ProcessLast5y(dataTbl = neusBaseline[neusBaseline$time <= 20, ], scenarioName = "Initial"),
+                     ProcessLast5y(dataTbl = neusBaseline, scenarioName = "Baseline"),
+                     ProcessLast5y(dataTbl = neusWind, scenarioName = "Energy"),
+                     ProcessLast5y(dataTbl = neusIncFish, scenarioName = "IncFish"),
+                     ProcessLast5y(dataTbl = neusDecFish, scenarioName = "DecFish"))
+  
+outPS <- qnmOutcomes %>% select(scenario, PS) %>%
+            group_by(scenario) %>%
+            mutate(PS=names(which.max(table(PS)))) %>%
+            unique()
+outPS
+
+qnmOutcomes <- qnmOutcomes %>% group_by(scenario) %>% #select(-"PS") %>%
+                  dplyr::summarise_at(vars(-PS), mean)
+
+  
+# qnmOutcomes <- merge(qnmOutcomes, outPS)
+# 
+# qnmOutcomes <- qnmOutcomes %>% mutate_at(vars(-PS), )
+
+runs <- qnmOutcomes$scenario[qnmOutcomes$scenario != "Initial"]
+for(i in runs){
+  qnmOutcomes <- qnmOutcomes %>% add_row(scenario = i, 
+                          qnmOutcomes[qnmOutcomes$scenario == i, -1] - qnmOutcomes[qnmOutcomes$scenario == "Initial", -1])
+}
+
+qnmOutcomes
+```
+
+# QNM results from Ch 1
+```{r}
+# Load original model results
+adjMat <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/ch1GBQNMresults/adjMat2.0.csv",
+                   stringsAsFactors = FALSE)
+totMat <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/ch1GBQNMresults/totalFeedback2.0.csv",
+                   stringsAsFactors = FALSE)
+weightMat <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/ch1GBQNMresults/weightedFeedback2.0.csv",
+                   stringsAsFactors = FALSE)
+
+# calculate simultaneous presses as sum of individual columns
+mmiQNMScenarios <- data.frame(node = adjMat$X,
+                              baselineSSTAdj = adjMat$Surface.Temperature,
+                              baselineSSTTot = totMat$Surface.Temperature,
+                              baselineSSTWeight = weightMat$Surface.Temperature,
+                              fishingNode1Adj = adjMat[, "Commercial.Groundfish.Fishery"],
+                              fishingNode2Adj = adjMat[, "Commercial.Shellfish.Fishery"],
+                              fishingNode3Adj = adjMat[, "Commercial.Pelagic.Fishery"],
+                              fishingNode1Tot = totMat[, "Commercial.Groundfish.Fishery"],
+                              fishingNode2Tot = totMat[, "Commercial.Shellfish.Fishery"],
+                              fishingNode3Tot = totMat[, "Commercial.Pelagic.Fishery"],
+                              energyNode1Adj = adjMat[, "Habitat..Nearshore"],
+                              energyNode2Adj = adjMat[, "Habitat..Seafloor...Demersal"],
+                              energyNode1Tot = totMat[, "Habitat..Nearshore"],
+                              energyNode2Tot = totMat[, "Habitat..Seafloor...Demersal"])
+
+# make sure to include warming in comparison scenarios
+mmiQNMScenarios$fishingSumAdj <- rowSums(mmiQNMScenarios[, c("baselineSSTAdj",
+                                                             "fishingNode1Adj",
+                                                             "fishingNode2Adj",
+                                                             "fishingNode3Adj")])
+mmiQNMScenarios$fishingSumTot <- rowSums(mmiQNMScenarios[, c("baselineSSTTot",
+                                                             "fishingNode1Tot",
+                                                             "fishingNode2Tot",
+                                                             "fishingNode3Tot")])
+mmiQNMScenarios$fishingWeight <- abs(mmiQNMScenarios$fishingSumAdj)/mmiQNMScenarios$fishingSumTot
+
+# negate adjacency values for decreases
+mmiQNMScenarios$decFishSumAdj <- rowSums(-mmiQNMScenarios[, c("fishingNode1Adj",
+                                                              "fishingNode2Adj",
+                                                              "fishingNode3Adj")])
+mmiQNMScenarios$decFishSumAdj <- mmiQNMScenarios$decFishSumAdj + mmiQNMScenarios$baselineSSTAdj
+mmiQNMScenarios$decFishWeight <- abs(mmiQNMScenarios$decFishSumAdj)/mmiQNMScenarios$fishingSumTot
+
+mmiQNMScenarios$energySumAdj <- rowSums(-mmiQNMScenarios[, c("energyNode1Adj",
+                                                             "energyNode2Adj")])
+mmiQNMScenarios$energySumAdj <- mmiQNMScenarios$energySumAdj + mmiQNMScenarios$baselineSSTAdj
+mmiQNMScenarios$energySumTot <- rowSums(mmiQNMScenarios[, c("baselineSSTTot",
+                                                            "energyNode1Tot",
+                                                            "energyNode2Tot")])
+mmiQNMScenarios$energyWeight <- abs(mmiQNMScenarios$energySumAdj)/mmiQNMScenarios$energySumTot
+
+# write.csv(mmiQNMScenarios, 
+#           file = 'C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/ch1GBQNMresults/Ch4_multimodelQNM_ScenarioResults.csv')
+
 ```
 
 
-# Adding measurement error
-Apply survey sampling OM functions to biomass truth
-These methods follow S. Gaichas and C. Stawitz here: https://sgaichas.github.io/poseidon-dev/NEUSStandardSurveyTest.html and https://sgaichas.github.io/poseidon-dev/StandardSurveyTest.html
+# Compare sign outcomes from QNMs and Atlantis output
 ```{r}
-# species groupings for different exposure to the survey
-# RW: edited for returning vert groups listed in 'indBDNLookup'
-nontrawl <- c("Shark_D", "Pinniped", "Whale_Baleen")
-pelagics <- c("Planktiv_L_Fish", "Planktiv_S_Fish", "Benthopel_Fish", "Pisciv_S_Fish")
-demersals <- c("Pisciv_D_Fish", "Demersal_D_Fish","Demersal_E_Fish", 
-                 "Demersal_S_Fish","Demersal_B_Fish","Demersal_DC_Fish",
-                 "Demersal_O_Fish","Demersal_F_Fish",
-                 "Shark_B", "SkateRay")
-selflats <- c("Pisciv_B_Fish")
-survspp <- c(nontrawl, pelagics, demersals, selflats)
+mmiQNMScenarios <- read.csv('C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/ch1GBQNMresults/Ch4_multimodelQNM_ScenarioResults.csv',
+                            stringsAsFactors = FALSE)
+mmiQNMScenarios$node <- gsub(".", "", x = mmiQNMScenarios$node, fixed = TRUE)
 
-# Use hardcoded fall sampling frame for NEUS 1.0 in trunk here
-annualfall <- seq(4,202,4)
+# include scenarios without climate change
+mmiQNMScenarios$fishingNoCCSumAdj <- rowSums(mmiQNMScenarios[, c("fishingNode1Adj",
+                                                             "fishingNode2Adj",
+                                                             "fishingNode3Adj")])
+mmiQNMScenarios$fishingNoCCSumTot <- rowSums(mmiQNMScenarios[, c("fishingNode1Tot",
+                                                             "fishingNode2Tot",
+                                                             "fishingNode3Tot")])
+mmiQNMScenarios$fishingNoCCWeight <- abs(mmiQNMScenarios$fishingNoCCSumAdj)/mmiQNMScenarios$fishingNoCCSumTot
+
+# negate adjacency values for decreases
+mmiQNMScenarios$decFishNoCCSumAdj <- rowSums(-mmiQNMScenarios[, c("fishingNode1Adj",
+                                                              "fishingNode2Adj",
+                                                              "fishingNode3Adj")])
+mmiQNMScenarios$decFishNoCCWeight <- abs(mmiQNMScenarios$decFishNoCCSumAdj)/mmiQNMScenarios$fishingNoCCSumTot
+
+mmiQNMScenarios$energyNoCCSumAdj <- rowSums(-mmiQNMScenarios[, c("energyNode1Adj",
+                                                             "energyNode2Adj")])
+mmiQNMScenarios$energyNoCCSumTot <- rowSums(mmiQNMScenarios[, c("energyNode1Tot",
+                                                            "energyNode2Tot")])
+mmiQNMScenarios$energyNoCCWeight <- abs(mmiQNMScenarios$energyNoCCSumAdj)/mmiQNMScenarios$energyNoCCSumTot
 
 
-#   define bottom trawl mixed efficiency
-ef.nt <- 0.01 # for large pelagics, reef dwellers, others not in trawlable habitat
-ef.pl <- 0.1  # for pelagics
-ef.dm <- 0.7  # for demersals
-ef.fl <- 1.1  # for selected flatfish
 
-# bottom trawl survey efficiency specification by species group
-effnontrawl <- data.frame(species=nontrawl, efficiency=rep(ef.nt,length(nontrawl)))
-effpelagics <- data.frame(species=pelagics, efficiency=rep(ef.pl,length(pelagics)))
-effdemersals <- data.frame(species=demersals, efficiency=rep(ef.dm,length(demersals)))
-effselflats <- data.frame(species=selflats, efficiency=rep(ef.fl,length(selflats)))
+nodeLookup <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/nodeLookup_QNM_BDN.csv",
+                       stringsAsFactors = FALSE)
 
-efficmix <- bind_rows(effnontrawl, effpelagics, effdemersals, effselflats)
+qnmCompare <- qnmOutcomes %>% filter(time == 50) %>% 
+                select(-time) %>% 
+  # add variable for change in protected species from outPS
+                mutate(PS = -1) %>% # HighIncreasing to HighDecreasing in all scenarios
+                pivot_longer(cols = -scenario, names_to = "node", values_to = "outcome") %>%
+                mutate(model = "NEUS",
+                       weight = NA) %>%
+                inner_join(nodeLookup, by = c("node" = "BDNnode")) %>%
+                select(-node) %>%
+                rename(node = QNMnode)
 
-#   mixed selectivity (using 10 agecl for all species)
-#     flat=1 for large pelagics, reef dwellers, others not in trawlable habitat
-#     sigmoid 0 to 1 with 0.5 inflection at agecl 3 for pelagics, reaching 1 at agecl 5, flat top
-#     sigmoid 0 to 1 with 0.5 inflection at agecl 5 for most demersals and flatfish, reaching 1 at agecl 7, flat top
-#     dome shaped 0 to 1 at agecl 6&7 for selected demersals, falling off to 0.7 by agecl 10
+# get weights for pch sizing in figures
+mmiQNMScenarioWeights <- mmiQNMScenarios %>% select(node, baselineSSTWeight, fishingWeight, decFishWeight, energyWeight,
+                                              fishingNoCCWeight, decFishNoCCWeight, energyNoCCWeight) %>%
+                      rename(Baseline = baselineSSTWeight,
+                             DecFish = decFishWeight,
+                             IncFish = fishingWeight,
+                             Energy = energyWeight,
+                             IncFishNoCC = fishingNoCCWeight, 
+                             DecFishNoCC = decFishNoCCWeight, 
+                             EnergyNoCC = energyNoCCWeight) %>%
+                      pivot_longer(cols = -node, names_to = "scenario", values_to = "weight")
 
-sigmoid <- function(a,b,x) {
-  1 / (1 + exp(-a-b*x))
+mmiQNMScenarios <- mmiQNMScenarios %>% select(node, baselineSSTAdj, fishingSumAdj, decFishSumAdj, energySumAdj,
+                                              fishingNoCCSumAdj, decFishNoCCSumAdj, energyNoCCSumAdj) %>%
+                      rename(Baseline = baselineSSTAdj,
+                             DecFish = decFishSumAdj,
+                             IncFish = fishingSumAdj,
+                             Energy = energySumAdj,
+                             IncFishNoCC = fishingNoCCSumAdj, 
+                             DecFishNoCC = decFishNoCCSumAdj, 
+                             EnergyNoCC = energyNoCCSumAdj) %>%
+                      pivot_longer(cols = -node, names_to = "scenario", values_to = "outcome") %>%
+                      mutate(model = "mmiQNM") %>%
+                      inner_join(mmiQNMScenarioWeights)
+
+# read in results from MSE of QNM fitted to NEUS data
+mseQNMScenarios <- read.csv('C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/qnmScenarios_Truth_20210310.csv',
+                            stringsAsFactors = FALSE)
+
+# include scenarios without climate change
+mseQNMScenarios$fishingNoCCSumAdj <- rowSums(mseQNMScenarios[, c("fishingNode1Adj",
+                                                             "fishingNode2Adj",
+                                                             "fishingNode3Adj")])
+mseQNMScenarios$fishingNoCCSumTot <- rowSums(mseQNMScenarios[, c("fishingNode1Tot",
+                                                             "fishingNode2Tot",
+                                                             "fishingNode3Tot")])
+mseQNMScenarios$fishingNoCCWeight <- abs(mseQNMScenarios$fishingNoCCSumAdj)/mseQNMScenarios$fishingNoCCSumTot
+
+# negate adjacency values for decreases
+mseQNMScenarios$decFishNoCCSumAdj <- rowSums(-mseQNMScenarios[, c("fishingNode1Adj",
+                                                              "fishingNode2Adj",
+                                                              "fishingNode3Adj")])
+mseQNMScenarios$decFishNoCCWeight <- abs(mseQNMScenarios$decFishNoCCSumAdj)/mseQNMScenarios$fishingNoCCSumTot
+
+mseQNMScenarios$energyNoCCSumAdj <- rowSums(-mseQNMScenarios[, c("energyNode1Adj",
+                                                             "energyNode2Adj")])
+mseQNMScenarios$energyNoCCSumTot <- rowSums(mseQNMScenarios[, c("energyNode1Tot",
+                                                            "energyNode2Tot")])
+mseQNMScenarios$energyNoCCWeight <- abs(mseQNMScenarios$energyNoCCSumAdj)/mseQNMScenarios$energyNoCCSumTot
+
+# get weights for pch sizing in figures
+mseQNMScenarioWeights <- mseQNMScenarios %>% select(node, baselineSSTWeight, fishingWeight, decFishWeight, energyWeight,
+                                              fishingNoCCWeight, decFishNoCCWeight, energyNoCCWeight) %>%
+                      rename(Baseline = baselineSSTWeight,
+                             DecFish = decFishWeight,
+                             IncFish = fishingWeight,
+                             Energy = energyWeight,
+                             IncFishNoCC = fishingNoCCWeight, 
+                             DecFishNoCC = decFishNoCCWeight, 
+                             EnergyNoCC = energyNoCCWeight) %>%
+                      pivot_longer(cols = -node, names_to = "scenario", values_to = "weight")
+
+mseQNMScenarios <- mseQNMScenarios %>% select(node, baselineSSTAdj, fishingSumAdj, decFishSumAdj, energySumAdj,
+                                              fishingNoCCSumAdj, decFishNoCCSumAdj, energyNoCCSumAdj) %>%
+                      rename(Baseline = baselineSSTAdj,
+                             DecFish = decFishSumAdj,
+                             IncFish = fishingSumAdj,
+                             Energy = energySumAdj,
+                             IncFishNoCC = fishingNoCCSumAdj, 
+                             DecFishNoCC = decFishNoCCSumAdj, 
+                             EnergyNoCC = energyNoCCSumAdj) %>%
+                      pivot_longer(cols = -node, names_to = "scenario", values_to = "outcome") %>%
+                      mutate(model = "mseQNMtruth") %>%
+                      inner_join(mseQNMScenarioWeights)
+
+qnmCompare <- rbind(qnmCompare, mmiQNMScenarios, mseQNMScenarios)
+
+qnmCompare$sign <- sign(qnmCompare$outcome)
+
+qnmCompare %>% filter(node == "ProtectedSpecies")
+```
+
+# Compare outcomes from BDNs and Atlantis output
+```{r}
+mseBDNScenarios <- read.table("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/GB_NEUS_MSE_NoErr_ScenarioBeliefs_20210218.txt", 
+                              header = TRUE, sep="\t", row.names = NULL, stringsAsFactors = FALSE)
+mmiBDNScenarios <- read.table("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/ch2GBBDNresults/GB_BDN_MMI_ScenarioBeliefs_20210218.txt", 
+                              header = TRUE, sep="\t", row.names = NULL, stringsAsFactors = FALSE)
+
+mseBDNScenarios <- mseBDNScenarios %>% mutate(model = "mseBDNtruth")
+mmiBDNScenarios <- mmiBDNScenarios %>% mutate(model = "mmiBDN")
+
+bdnCompare <- rbind(mseBDNScenarios, mmiBDNScenarios)
+
+#bdnCompare <- bdnCompare %>% select(model, starts_with("most.prob"))
+
+# Instead, report estimated probabilities of the favored state (or high state)
+bdnCompare <- bdnCompare %>% select(model, most.prob.Strategy, 
+                                    P.soccultvals2.Better.,
+                                    P.soccultvals3.Better.,
+                                    P.recParticip2.High.,
+                                    P.recParticip3.High.,
+                                    P.employment2.High.,
+                                    P.employment3.High.,
+                                    P.seafood2.High.,
+                                    P.seafood3.High.,
+                                    P.profits2.High.,
+                                    P.profits3.High.,
+                                    P.habDem2.High.,
+                                    P.habDem3.High.,
+                                    P.habPel2.High.,
+                                    P.habPel3.High.,
+                                    P.habNear2.Increasing.,
+                                    P.habNear3.Increasing.,
+                                    P.forage2.Above_Bmsy.,
+                                    P.forage3.Above_Bmsy.,
+                                    P.ground2.Above_Bmsy.,
+                                    P.ground3.Above_Bmsy.,
+                                    P.inverts2.Above_Bmsy.,
+                                    P.inverts3.Above_Bmsy.,
+                                    P.PS2.HighIncreasing.,
+                                    P.PS3.HighIncreasing.,
+                                    P.gfMAB2.High.,
+                                    P.gfMAB3.High.,
+                                    P.commGF2.Below_MSY.,
+                                    P.commGF3.Below_MSY.,
+                                    P.commSF2.Below_MSY.,
+                                    P.commSF3.Below_MSY.,
+                                    P.commPel2.Below_MSY.,
+                                    P.commPel3.Below_MSY.,
+                                    P.GZ2.High.,
+                                    P.GZ3.High.,
+                                    P.benthos2.High.,
+                                    P.benthos3.High.,
+                                    P.detBac2.High.,
+                                    P.detBac3.High.,
+                                    P.copepod2.High.,
+                                    P.copepod3.High.,
+                                    P.PP2.High.,
+                                    P.PP3.High.,
+                                    P.strat2.High.,
+                                    P.strat3.High.,
+                                    P.SST2.High.,
+                                    P.SST3.High.,
+                                    P.BT2.High.,
+                                    P.BT3.High.,
+                                    P.SSS2.High.,
+                                    P.SSS3.High.,
+                                    P.BS2.High.,
+                                    P.BS3.High.)
+
+```
+
+Process the NEUS scenario output using similar scaling, etc. as BDNDataPrep_GB.R
+```{r}
+# Load and scale BDN MSE dataset derived from NEUS historical data
+bdnMSEData <- read.csv("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/GB_BDN_MSE_data_20210125.csv",
+                      stringsAsFactors = FALSE)
+
+# Create threshold lookup table with scaling info for MSE data
+tHoldMSE <- tHold %>% mutate(center = NA,
+                             scale = NA)
+
+# Scale and center raw data indices (not anomalies, percentages, or categorical variables)
+# Need to create anomalies for Temp and Sal data and copepods
+
+# make list of variables to loop through
+# create the scale and extract center and scale
+# insert into tHoldMSE based on looped variable
+vars <- c("BT", "BS", "SST", "SSS", "copepod", "gfMAB", "GZ", "strat", "habPel", 
+          "habDem", "PP", "detBac", "benthos", "commPel", "commGF", "commSF", "recParticip")
+
+for(i in vars){
+  varScale <- scale(bdnMSEData[, i], center = TRUE, scale = TRUE)
+  
+  tHoldMSE[which(tHoldMSE$Node == i), "center"] <- attr(varScale, "scaled:center")
+  tHoldMSE[which(tHoldMSE$Node == i), "scale"] <- attr(varScale, "scaled:scale")
 }
 
-# survey selectivity specification by species group
-selnontrawl <- data.frame(species=rep(nontrawl, each=10),
-                          agecl=rep(c(1:10),length(nontrawl)),
-                          selex=rep(1.0,length(nontrawl)*10))
-selpelagics <- data.frame(species=rep(pelagics, each=10),
-                          agecl=rep(c(1:10),length(pelagics)),
-                          selex=sigmoid(5,1,seq(-10,10,length.out=10)))
-seldemersals <- data.frame(species=rep(demersals, each=10),
-                          agecl=rep(c(1:10),length(demersals)),
-                          selex=sigmoid(1,1,seq(-10,10,length.out=10)))
-selselflats <- data.frame(species=rep(selflats, each=10),
-                          agecl=rep(c(1:10),length(selflats)),
-                          selex=sigmoid(1,1,seq(-10,10,length.out=10)))
+# Scaled thresholds:
+# MSY estimates
+fi <- read.delim("NEUS_MSE/prodmodel_SF20210118_NoObsErr.cor", skip = 1, sep="")
+fi <- fi[,1:4]
+fiMSY <- fi[fi$name == "MSY", "value"]
+sfScale <- scale(bdnMSEData$commSF, center = TRUE, scale = TRUE)
+tHoldMSE[which(tHoldMSE$Node == "commSF"), "tHold"] <- (log(fiMSY)-attr(sfScale, "scaled:center"))/attr(sfScale, "scaled:scale")
 
-# same selectivity for selflats and demersals specified above
-# visualze selectivity curves for each group
-par(mfrow=c(2,2))
-par(mar=c(4,4,1,1))
-plot(selnontrawl$agecl, selnontrawl$selex)
-plot(selpelagics$agecl, selpelagics$selex)
-plot(seldemersals$agecl, seldemersals$selex)
-plot(selselflats$agecl, selselflats$selex)
+ff <- read.delim("NEUS_MSE/prodmodel_FF20210123_NoObsErr.cor", skip = 1, sep="")
+ff <- ff[,1:4]
+ffMSY <- ff[ff$name == "MSY", "value"]
+ffScale <- scale(bdnMSEData$commPel, center = TRUE, scale = TRUE)
+tHoldMSE[which(tHoldMSE$Node == "commPel"), "tHold"] <- (log(ffMSY)-attr(ffScale, "scaled:center"))/attr(ffScale, "scaled:scale")
 
-selexmix <- bind_rows(selnontrawl, selpelagics, seldemersals, selselflats)
+gf <- read.delim("NEUS_MSE/prodmodel_GF20210120_NoObsErr.cor", skip = 1, sep="")
+gf <- gf[,1:4]
+gfMSY <- gf[gf$name == "MSY", "value"]
+gfScale <- scale(bdnMSEData$commGF, center = TRUE, scale = TRUE)
+tHoldMSE[which(tHoldMSE$Node == "commGF"), "tHold"] <- (log(gfMSY)-attr(gfScale, "scaled:center"))/attr(gfScale, "scaled:scale")
 
-# use this constant 0 cv for testing
-#surv_cv_0 <- data.frame(species=survspp, cv=rep(0.0,length(survspp)))
+tHoldMSE[which(tHoldMSE$Node == "recParticip"), "tHold"] <- 0
 
-#   define bottom trawl survey cv by group
-cv.nt <- 1.0 # for large pelagics, reef dwellers, others not in trawlable habitat
-cv.pl <- 0.5  # for pelagics
-cv.dm <- 0.3  # for demersals
-cv.fl <- 0.3  # for selected flatfish
+# Colate NEUS outputs and translate to BDN states
+# processing function then apply over each scenario's table
+ProcessFrst2y <- function(dataTbl, # Scenario data table with numeric vals
+                          scenarioName # Character lable for the scenario
+                          ){
+  sumTbl <- dataTbl %>% 
+                  filter(time <= 2) %>%
+                  mutate(scenario = scenarioName)
+  
+  # Need to turn habNear into percentage change data
+  sumTbl$habNearPct <- NA
+  for(i in 2:nrow(sumTbl)){
+    sumTbl$habNearPct[i] <- (((sumTbl$habNear[i]/sumTbl$habNear[i-1])^(1/2))-1)*100
+  }
+  #sumTbl %>% dplyr::select(time, habNear, habNearPct)
+  
+  sumTbl$habNear <- sumTbl$habNearPct
+  
+  return(sumTbl)
+                          }
 
-# specify cv by species groups
-surv_cv_nontrawl <- data.frame(species=nontrawl, cv=rep(cv.nt,length(nontrawl)))
-surv_cv_pelagics <- data.frame(species=pelagics, cv=rep(cv.pl,length(pelagics)))
-surv_cv_demersals <- data.frame(species=demersals, cv=rep(cv.dm,length(demersals)))
-surv_cv_selflats <- data.frame(species=selflats, cv=rep(cv.fl,length(selflats)))
+bdnOutcomes <- rbind(ProcessFrst2y(dataTbl = neusBaseline, scenarioName = "Baseline"),
+                     ProcessFrst2y(dataTbl = neusWind, scenarioName = "Energy"),
+                     ProcessFrst2y(dataTbl = neusIncFish, scenarioName = "IncFish"),
+                     ProcessFrst2y(dataTbl = neusDecFish, scenarioName = "DecFish"))
 
-surv_cv_mix <- bind_rows(surv_cv_nontrawl, surv_cv_pelagics, surv_cv_demersals, surv_cv_selflats)
+# Next scale NEUS output and compare to thresholds in 'tHoldMSE'
 
-# use biomasses from 'truth' via run_truth() to sample and add survey error
-survey_testBstd <- create_survey(dat = biomassTruth,
-                                 time = annualfall,
-                                 species = survspp,
-                                 boxes = c(5,7:11,19), # Georges Bank boxes
-                                 effic = efficmix,
-                                 selex = selexmix)
+# Log-transform biomass  and count indices first
+bdnOutcomes$gfMAB <- log(bdnOutcomes$gfMAB)
+bdnOutcomes$GZ <- log(bdnOutcomes$GZ)
+bdnOutcomes$copepod <- log(bdnOutcomes$copepod)
+bdnOutcomes$benthos <- log(bdnOutcomes$benthos)
+bdnOutcomes$commPel <- log(bdnOutcomes$commPel)
+bdnOutcomes$commGF <- log(bdnOutcomes$commGF)
+bdnOutcomes$commSF <- log(bdnOutcomes$commSF)
+bdnOutcomes$recParticip <- log(bdnOutcomes$recParticip)
 
-# call sample_survey_biomass with a bunch of 1s for weight at age
-# in the code it multiplies atoutput by wtatage so this allows us to use
-# biomass directly
-wtage <- data.frame(species=rep(survspp, each=10),
-                    agecl=rep(c(1:10),length(survspp)),
-                    wtAtAge=rep(1.0,length(survspp)*10))
+for(i in vars){
+  
+  bdnOutcomes[, paste0(i, "scaled")] <- (bdnOutcomes[, i] - tHoldMSE[tHoldMSE$Node == i, "center"])/tHoldMSE[tHoldMSE$Node == i, "scale"]
+  
+  bdnOutcomes[, i] <- if_else(bdnOutcomes[, paste0(i, "scaled")] < tHoldMSE[tHoldMSE$Node == i, "tHold"], 
+                                 true = tHoldMSE[tHoldMSE$Node == i, "lowState"],
+                                 false = tHoldMSE[tHoldMSE$Node == i, "hiState"])
+}
 
-stdsurveyB_frombio <- sample_survey_biomass(survey_testBstd, surv_cv_mix, wtage)
+# Discretize nearshore habitat variable
+bdnOutcomes$habNear <- if_else(bdnOutcomes$habNear < tHoldMSE[tHoldMSE$Node == "habNear", "tHold"], 
+                                 true = tHoldMSE[tHoldMSE$Node == "habNear", "lowState"],
+                                 false = tHoldMSE[tHoldMSE$Node == "habNear", "hiState"])
 
-# Want numbers for pinnipeds and baleen whales though
+# Determine if biomass is above/below Bmsy based on index point estimate
+# First apply catchability and 75% survey coverage to biomass timeseries
+qFF <- 0.1383182
+bdnOutcomes$forage <- bdnOutcomes$forage * qFF * 0.75
+# translate index into biomass estimate based on line 187 of prodmodel.tpl
+bdnOutcomes$forage <- exp(log(bdnOutcomes$forage) - log(na.omit(ff[ff$name == "q", "value"]))) - 1.e-07
+# calculate ratio of estimated biomass to Bmsy
+bdnOutcomes$forageRatio <- bdnOutcomes$forage/ff[ff$name == "Bmsy", "value"]
+# Discretize forage biomass ratio variable
+bdnOutcomes$forage <- if_else(bdnOutcomes$forageRatio < 1, 
+                              true = tHoldMSE[tHoldMSE$Node == "forage", "hiState"], # switch these b/c not measuring probability, just whether above or below Bmsy
+                              false = tHoldMSE[tHoldMSE$Node == "forage", "lowState"])
+
+# First apply catchability and 75% survey coverage to biomass timeseries
+qGF <- 0.182875
+bdnOutcomes$ground <- bdnOutcomes$ground * qGF * 0.75
+# translate index into biomass estimate based on line 187 of prodmodel.tpl
+bdnOutcomes$ground <- exp(log(bdnOutcomes$ground) - log(na.omit(gf[gf$name == "q", "value"]))) - 1.e-07
+# calculate ratio of estimated biomass to Bmsy
+bdnOutcomes$groundRatio <- bdnOutcomes$ground/gf[gf$name == "Bmsy", "value"]
+# Discretize forage biomass ratio variable
+bdnOutcomes$ground <- if_else(bdnOutcomes$groundRatio < 1, 
+                              true = tHoldMSE[tHoldMSE$Node == "ground", "hiState"], # switch these b/c not measuring probability, just whether above or below Bmsy
+                              false = tHoldMSE[tHoldMSE$Node == "ground", "lowState"])
+
+# translate index into biomass estimate based on line 187 of prodmodel.tpl
+bdnOutcomes$inverts <- exp(log(bdnOutcomes$inverts) - log(na.omit(fi[fi$name == "q", "value"]))) - 1.e-07
+# calculate ratio of estimated biomass to Bmsy
+bdnOutcomes$invertsRatio <- bdnOutcomes$inverts/fi[fi$name == "Bmsy", "value"]
+# Discretize forage biomass ratio variable
+bdnOutcomes$inverts <- if_else(bdnOutcomes$invertsRatio < 1, 
+                              true = tHoldMSE[tHoldMSE$Node == "inverts", "hiState"], # switch these b/c not measuring probability, just whether above or below Bmsy
+                              false = tHoldMSE[tHoldMSE$Node == "inverts", "lowState"])
+bdnOutcomes
+```
+# Combine BDN output together in one table
+```{r}
+# bdnCompare <- bdnCompare %>% rename(scenario = most.prob.Strategy) %>%
+#                 pivot_longer(cols = -c("model","scenario"), names_to = c("node", "time"), names_prefix = "most.prob.", 
+#                              names_sep = -1, values_to = "outcome") %>%
+#                 mutate(time = as.numeric(time) - 1)
+
+bdnCompare <- bdnCompare %>% rename(scenario = most.prob.Strategy) %>%
+                pivot_longer(cols = -c("model","scenario"), names_to = "node", names_prefix = "P.", 
+                             values_to = "probFavored") %>% 
+                separate(col = node, into = c("node", "state", NA), sep = "\\.") %>% # Separate into three columns by period
+                separate(col = node, into = c("node","time"), sep = "(?<=[A-Za-z])(?=[0-9])")  %>% # Separate column into two columns by text and number
+                mutate(time = as.numeric(time) - 1)
+
+
+bdnCompare$scenario <- recode(bdnCompare$scenario, Maintain_Fishing = "Baseline",
+                                                   Increase_Fishing = "IncFish",
+                                                   Decrease_Fishing = "DecFish",
+                                                   Energy_Extraction = "Energy")
+
+bdnOutcomes <- bdnOutcomes %>% select(cols = -c(contains("Scaled"), contains("Ratio"), contains("Pct"))) %>%
+                  pivot_longer(cols = -c("scenario", "time"), names_to = "node", values_to = "state") %>%
+                  mutate(model = "NEUS",
+                         probFavored = NA) # fill this in by hand for now
+
+bdnCompare <- rbind(bdnCompare, bdnOutcomes)
+
+bdnCompare %>% filter(model == "NEUS",
+                      time == 2)
+```
+
+
+Format tables for ms
+```{r}
+wideQNMout <- qnmCompare %>% select(-outcome, -weight) %>%
+                pivot_wider(names_from = c(model, scenario), values_from = sign)
+# write.csv(wideQNMout, file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/results/QNMresults_20210310.csv")
+
+wideBDNout <- bdnCompare %>% filter(time == 2) %>%
+                select(-time) %>%
+                pivot_wider(names_from = c(model, scenario), values_from = probFavored) %>%
+                inner_join(y = nodeLookup, by = c("node" = "BDNnode")) %>%
+                relocate(QNMnode)
+# write.csv(wideBDNout, file = "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/results/BDNresults_20210309.csv")
+
 ```

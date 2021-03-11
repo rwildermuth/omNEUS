@@ -169,25 +169,33 @@ all(Re(eigVals)<=0)
 # Get adjoint matrix
 adjMat <- make.adjoint(atlAssessMat, status = TRUE)
 
-write.csv(adjMat, 
-          'C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/adjMat2.0.csv')
+# write.csv(adjMat, 
+#           'C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/adjMat2.0.csv')
 
 # Get absolute feedback matrix
 totMat <- make.T(atlAssessMat)
 
-write.csv(totMat, 
-          'C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/totalFeedback2.0.csv')
+# write.csv(totMat, 
+#           'C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/totalFeedback2.0.csv')
 
 # get the weighted feedback matrix
 weightedFB <- make.wfm(atlAssessMat, status = TRUE)
 
-write.csv(weightedFB, 
-          'C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/weightedFeedback2.0.csv')
+# write.csv(weightedFB, 
+#           'C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/weightedFeedback2.0.csv')
 
 
 # Management Scenarios ----------------------------------------------------
+adjMat <- read.csv('C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/adjMat2.0.csv')
+totMat <- read.csv('C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/totalFeedback2.0.csv')
+weightMat <- read.csv('C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/weightedFeedback2.0.csv')
+
 # calculate simultaneous presses as sum of individual columns
-qnmScenarios <- data.frame(fishingNode1Adj = adjMat[, "CommercialGroundfishFishery"],
+qnmScenarios <- data.frame(node = adjMat$X,
+                           baselineSSTAdj = adjMat$SurfaceTemperature,
+                           baselineSSTTot = totMat$SurfaceTemperature,
+                           baselineSSTWeight = weightMat$SurfaceTemperature,
+                           fishingNode1Adj = adjMat[, "CommercialGroundfishFishery"],
                            fishingNode2Adj = adjMat[, "CommercialShellfishFishery"],
                            fishingNode3Adj = adjMat[, "CommercialPelagicFishery"],
                            fishingNode1Tot = totMat[, "CommercialGroundfishFishery"],
@@ -197,10 +205,13 @@ qnmScenarios <- data.frame(fishingNode1Adj = adjMat[, "CommercialGroundfishFishe
                            energyNode2Adj = adjMat[, "HabitatSeafloorDemersal"],
                            energyNode1Tot = totMat[, "HabitatNearshore"],
                            energyNode2Tot = totMat[, "HabitatSeafloorDemersal"])
-qnmScenarios$fishingSumAdj <- rowSums(qnmScenarios[, c("fishingNode1Adj",
+
+qnmScenarios$fishingSumAdj <- rowSums(qnmScenarios[, c("baselineSSTAdj",
+                                                       "fishingNode1Adj",
                                                        "fishingNode2Adj",
                                                        "fishingNode3Adj")])
-qnmScenarios$fishingSumTot <- rowSums(qnmScenarios[, c("fishingNode1Tot",
+qnmScenarios$fishingSumTot <- rowSums(qnmScenarios[, c("baselineSSTTot",
+                                                       "fishingNode1Tot",
                                                        "fishingNode2Tot",
                                                        "fishingNode3Tot")])
 qnmScenarios$fishingWeight <- abs(qnmScenarios$fishingSumAdj)/qnmScenarios$fishingSumTot
@@ -209,12 +220,15 @@ qnmScenarios$fishingWeight <- abs(qnmScenarios$fishingSumAdj)/qnmScenarios$fishi
 qnmScenarios$decFishSumAdj <- rowSums(-qnmScenarios[, c("fishingNode1Adj",
                                                        "fishingNode2Adj",
                                                        "fishingNode3Adj")])
+qnmScenarios$decFishSumAdj <- qnmScenarios$decFishSumAdj + qnmScenarios$baselineSSTAdj
 qnmScenarios$decFishWeight <- abs(qnmScenarios$decFishSumAdj)/qnmScenarios$fishingSumTot
 
 qnmScenarios$energySumAdj <- rowSums(-qnmScenarios[, c("energyNode1Adj",
                                                        "energyNode2Adj")])
-qnmScenarios$energySumTot <- rowSums(qnmScenarios[, c("energyNode1Tot",
+qnmScenarios$energySumTot <- rowSums(qnmScenarios[, c("baselineSSTTot",
+                                                      "energyNode1Tot",
                                                        "energyNode2Tot")])
+qnmScenarios$energySumAdj <- qnmScenarios$energySumAdj + qnmScenarios$baselineSSTAdj
 qnmScenarios$energyWeight <- abs(qnmScenarios$energySumAdj)/qnmScenarios$energySumTot
 
-write.csv(qnmScenarios, file = 'C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/qnmScenarios_Truth_20210115.csv')
+# write.csv(qnmScenarios, file = 'C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/qnmScenarios_Truth_20210310.csv')

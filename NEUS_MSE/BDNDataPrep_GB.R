@@ -433,3 +433,47 @@ ffScale <- scale(log(neusHistoricData$commPel), center = TRUE, scale = TRUE)
 
 gfScale <- scale(log(neusHistoricData$commGF), center = TRUE, scale = TRUE)
 (log(gfMSY)-attr(gfScale, "scaled:center"))/attr(gfScale, "scaled:scale")
+
+
+
+# Prepare input for management scenario assessment ------------------------
+bdnMSEData <- read.table("C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/GB_BDN_MSE_data_20210125.txt", 
+                         header = TRUE, sep="\t", row.names = NULL, na.strings = "*")
+
+# select last year of historic time series as initilization values
+bdnScenarioCases <- bdnMSEData %>% filter(is.na(IDnum)) %>% select(IDnum, ends_with("1")) %>%
+                        # Include climate forcing with SST in high state
+                        mutate(SST2 = "High",
+                               SST3 = "High") %>%
+                        # repeat these data for each scenario and add a scenario state column
+                        slice(rep(1, each = 4)) %>%
+                        mutate(Strategy = c("Maintain_Fishing",
+                                            "Increase_Fishing",
+                                            "Decrease_Fishing",
+                                            "Energy_Extraction")) %>%
+                        mutate(IDnum = 1:n())
+
+write.table(bdnScenarioCases,
+            "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/GB_BDN_MSE_ScenarioCases_20210218.txt", 
+            sep="\t", row.names = FALSE)
+
+# data input for management scenario assessment for Ch 2 multi-model inference
+bdnMMIData <- read.table("C:/Users/rwildermuth/Dropbox/PhD_UMass/GB_BBN/AltModels/GB_yr1_data_20190926.txt", 
+                         header = TRUE, sep="\t", row.names = NULL, na.strings = "*")
+
+# select year 2014 for initialization values
+bdnMMIScenarioCases <- bdnMMIData %>% filter(IDnum == 2014) %>% 
+                          # Include climate forcing with SST in high state
+                          mutate(SST2 = "High",
+                                 SST3 = "High") %>%
+                          # repeat these data for each scenario and add a scenario state column
+                          slice(rep(1, each = 4)) %>%
+                          mutate(Strategy = c("Maintain_Fishing",
+                                              "Increase_Fishing",
+                                              "Decrease_Fishing",
+                                              "Energy_Extraction")) %>%
+                          mutate(IDnum = 1:n())
+
+write.table(bdnMMIScenarioCases,
+            "C:/Users/rwildermuth/Dropbox/PhD_UMass/ATLANTIS/omNEUS/NEUS_MSE/GB_BDN_MMI_ScenarioCases_20210218.txt", 
+            sep="\t", row.names = FALSE, na = "*")
